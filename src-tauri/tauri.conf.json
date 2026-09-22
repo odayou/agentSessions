@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgentSessions",
+  "version": "0.1.0",
+  "identifier": "com.agentsessions.app",
+  "build": {
+    "beforeDevCommand": "cd ui && npm run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "node scripts/pack-backend.js && cd ui && npm run build",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "AgentSessions",
+        "label": "main",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 960,
+        "minHeight": 640,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis", "msi"],
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "resources": ["backend/**/*"],
+    "category": "DeveloperTool",
+    "shortDescription": "跨 AI 编码平台的统一会话管理工具",
+    "longDescription": "自动发现本机 coding agent 的会话，按项目聚合、按账号区分、分层渐进披露式检索。"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "name": "agentsessions-core",
+  "version": "0.1.0",
+  "description": "跨 AI 编码平台的统一会话管理工具 - 采集/解析核心（Node）",
+  "license": "MIT",
+  "private": true,
+  "main": "src/index.js",
+  "bin": {
+    "as": "src/cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "scan": "node src/cli.js scan",
+    "search": "node src/cli.js search",
+    "bridge": "node server.js",
+    "dev:ui": "cd ui && npm run dev",
+    "build:backend": "node scripts/pack-backend.js",
+    "dev": "npm run dev:ui && npm run dev:bridge",
+    "build:app": "cd ui && npm run tauri build"
+  },
+  "dependencies": {
+    "better-sqlite3": "^9.6.0"
+  }
+}

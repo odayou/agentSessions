@@ -1,0 +1,25 @@
+[package]
+name = "agentsessions"
+version = "0.1.0"
+description = "跨 AI 编码平台的统一会话管理工具"
+edition = "2021"
+
+# 打包无法在 Windows 交叉，仅本机
+[lib]
+name = "agentsessions_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# devtools 特性：release 打包版也允许打开 WebView 开发者工具（F12 调试前端）
+tauri = { version = "2", features = ["devtools"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
+panic = "abort"

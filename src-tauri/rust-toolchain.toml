@@ -1,0 +1,3 @@
+[toolchain]
+# 固定使用 MSVC 工具链（GNU+gcc 链接 Tauri/WebView2 会触发 export ordinal 错误）
+channel = "stable-x86_64-pc-windows-msvc"

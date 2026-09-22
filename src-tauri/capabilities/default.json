@@ -1,0 +1,8 @@
+{
+  "identifier": "default",
+  "description": "默认主窗口能力：允许调用 core 基础能力（前端无需额外权限，检索经 HTTP 桥而非 IPC）",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

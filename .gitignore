@@ -1,0 +1,41 @@
+# ===== 依赖 =====
+node_modules/
+ui/node_modules/
+
+# ===== 构建产物 =====
+/dist/
+ui/dist/
+ui/tsconfig.tsbuildinfo
+
+# ===== 本地缓存 / 临时文件 =====
+.npmcache/
+.npm/
+npm-debug.log*
+*.log
+*.pid
+
+# ===== Tauri / Rust =====
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock
+src-tauri/backend/
+
+# ===== 环境与配置 =====
+.env
+.env.*
+!.env.example
+
+# ===== 本地数据（数据库位于用户主目录 ~/.agentsessions，不入库） =====
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ===== 调试探针脚本（非交付物） =====
+_probe*.py
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
