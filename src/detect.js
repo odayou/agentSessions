@@ -60,22 +60,22 @@ const AGENTS = {
   },
   traework: {
     label: 'TRAE SOLO',
-    // TraeWork / TRAE SOLO 桌面版（会话为私有格式，占位适配器）
+    // TraeWork / TRAE SOLO 桌面版（会话为加密 SQLite，基础适配器）
     detect: () => hasDir('AppData/Roaming/TRAE SOLO CN') || hasDir('.traework'),
   },
   codebuddy: {
     label: 'CodeBuddy',
-    // CLI 配置（~/.codebuddy）或桌面版（Roaming\CodeBuddy CN）；会话为私有格式，占位适配器
+    // CLI 配置（~/.codebuddy）或桌面版（Roaming\CodeBuddy CN）；基础适配器
     detect: () => hasDir('.codebuddy') || hasDir('AppData/Roaming/CodeBuddy CN') || inPath('codebuddy'),
   },
   lingma: {
     label: 'Lingma',
-    // 通义灵码（~/.lingma）；会话索引为 zap 二进制，占位适配器
+    // 通义灵码（~/.lingma）；基础适配器
     detect: () => hasDir('.lingma'),
   },
   codex: {
     label: 'Codex',
-    // Codex CLI（~/.codex）；rollout 会话格式，占位适配器
+    // Codex CLI（~/.codex）；基础适配器
     detect: () => hasDir('.codex') || inPath('codex'),
   },
 }

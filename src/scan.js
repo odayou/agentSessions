@@ -6,16 +6,16 @@ const { openStore } = require('./model')
 const store = require('./store')
 const config = require('./config')
 
-// Agent → 适配器映射（placeholder 为"已安装、暂不可索引"的占位实现）
+// Agent → 适配器映射
 const ADAPTERS = {
   opencode: './../adapters/opencode',
   'claude-code': './../adapters/claude-code',
   workbuddy: './../adapters/workbuddy',
   trae: './../adapters/trae',
-  traework: './../adapters/traework', // placeholder
-  codebuddy: './../adapters/codebuddy', // placeholder
-  lingma: './../adapters/lingma', // placeholder
-  codex: './../adapters/codex', // placeholder
+  traework: './../adapters/traework',
+  codebuddy: './../adapters/codebuddy',
+  lingma: './../adapters/lingma',
+  codex: './../adapters/codex',
 }
 
 // 把一批 session item 落库；返回 { sessions, turns }（项目 cwd 命中排除规则则跳过）

@@ -57,16 +57,16 @@
 
 ## 支持的 AI 工具
 
-| 工具        | 状态                    | 说明                                                        |
-| ----------- | ----------------------- | ----------------------------------------------------------- |
-| Claude Code | ✅ 完整支持             | 读取`~/.claude/projects`，含思考过程、工具调用、文件变更  |
-| OpenCode    | ✅ 完整支持             | 读取`~/.local/share/opencode`                             |
-| WorkBuddy   | ✅ 完整支持             | 读取`~/.workbuddy/projects`                               |
-| Trae        | ✅ 完整支持             | 读取（`~/.trae-cn/memory/projects`） |
-| Codex       | 🟡 已检测，暂不支持索引 | 检测安装状态，解析适配器待实现                              |
-| CodeBuddy   | 🟡 已检测，暂不支持索引 | 同上                                                        |
-| Lingma      | 🟡 已检测，暂不支持索引 | 同上                                                        |
-| TraeWork    | 🟡 已检测，暂不支持索引 | 同上                                                        |
+| 工具        | 状态        | 说明                                                       |
+| ----------- | ----------- | ---------------------------------------------------------- |
+| Claude Code | ✅ 完整支持 | 读取`~/.claude/projects`，含思考过程、工具调用、文件变更 |
+| OpenCode    | ✅ 完整支持 | 读取`~/.local/share/opencode`                            |
+| WorkBuddy   | ✅ 完整支持 | 读取`~/.workbuddy/projects`                              |
+| Trae        | ✅ 完整支持 | 读取（`~/.trae-cn/memory/projects`）                     |
+| Codex       | ✅ 基础支持 | 读取`~/.codex/sessions`，解析 rollout JSONL 格式         |
+| CodeBuddy   | ✅ 基础支持 | 读取`~/.codebuddy/projects`，解析 transcript JSONL 格式  |
+| Lingma      | ✅ 基础支持 | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件             |
+| TraeWork    | ✅ 基础支持 | 读取`AppData/Roaming/TRAE SOLO CN`，尝试解析会话文件     |
 
 未识别 cwd 的会话归入"未分类"项目，不会丢弃；自定义安装路径可在设置页手动指定。
 
@@ -142,7 +142,7 @@ agentSessions/
 ├── adapters/             # agent 适配器（一 agent 一文件）
 │   ├── lib.js            #   共享工具：findJsonlFiles / buildSubjects
 │   ├── claude-code.js / opencode.js / workbuddy.js / trae.js   # 完整适配器
-│   └── codex.js / codebuddy.js / lingma.js                     # 占位适配器
+│   └── codex.js / codebuddy.js / lingma.js / traework.js       # 基础适配器
 ├── server.js             # REST 桥接（127.0.0.1:18778，原生 http，零框架）
 ├── scripts/
 │   └── pack-backend.js   # 桌面打包：组装自包含后端载荷 → src-tauri/backend/
@@ -208,8 +208,6 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 | 端口被占用                  | `AGENTSESSIONS_PORT` 换端口，或找到占用进程                                                 |
 | 数据乱了想重来              | 删除`~/.agentsessions/agentsessions.db` 重新扫描即可，原始会话文件无损                      |
 
-
-
 ---
 
 ## 打包
@@ -257,7 +255,8 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 1. **注册检测**：在 [src/detect.js](src/detect.js) 的 `AGENTS` 中添加安装检测（目录存在 / 可执行文件存在即视为已安装）
 2. **实现适配器** [adapters/&lt;agentId&gt;.js](adapters)：
    - **完整适配器**（参考 `claude-code.js`）：导出 `id` / `label` / `sourceDir` / `sourceFormat` / `sources()`（枚举会话文件）/ `parseFile()`（解析为统一会话模型：session + project + turns + subjects）
-   - **占位适配器**（参考 `codex.js`）：只导出 `id` / `label` / `placeholder` / `plan`（解析思路备注），设置页会显示"已安装 · 暂不支持索引"
+   - **基础适配器**（参考 `codex.js`）：导出 `id` / `label` / `sourceDir` / `sourceFormat` / `sources()` / `parseFile()`，提供基础会话解析支持
+   - **占位适配器**（参考旧版 `codex.js`）：只导出 `id` / `label` / `placeholder` / `plan`（解析思路备注），设置页会显示"已安装 · 暂不支持索引"
    - 通用逻辑用 [adapters/lib.js](adapters/lib.js) 的 `findJsonlFiles` / `buildSubjects`，不要复制粘贴
 3. **同步三处清单**（新增 agent 必须三处一致）：
    - `src/detect.js` 的 `AGENTS`
