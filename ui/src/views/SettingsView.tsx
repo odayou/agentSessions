@@ -31,6 +31,9 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
   const [agentPaths, setAgentPaths] = useState<Record<string, string>>({})
   // 大文件保护：超过该阈值的会话文件跳过索引（默认 50MB）
   const [maxSize, setMaxSize] = useState(50)
+  // 远端适配器清单仓库（空 = 关闭；声明式清单三源合并的"远端"来源）
+  const [manifestRepo, setManifestRepo] = useState('')
+  const [manifestRefresh, setManifestRefresh] = useState(60)
   // 搜索快捷键（点击录入框后按下新按键；'/' 为默认）
   const [hotkey, setHotkey] = useState('/')
   const [recording, setRecording] = useState(false)
@@ -51,6 +54,8 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
       setAutoScan(c.autoScanMinutes)
       setAgentPaths(c.agentPaths || {})
       setMaxSize(c.maxFileSizeMB ?? 50)
+      setManifestRepo(c.manifestRepo || '')
+      setManifestRefresh(c.manifestRefreshMinutes ?? 60)
       setHotkey(c.searchHotkey || '/')
     }).catch((e) => setErr(String(e)))
     fetchAccounts().then(setAccounts).catch(() => {})
@@ -103,10 +108,13 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
       const saved = await saveConfig({
         excludes, autoScanMinutes: autoScan, accountMapping,
         agentPaths: nextPaths, maxFileSizeMB: maxSize, searchHotkey: hotkey,
+        manifestRepo: manifestRepo.trim(), manifestRefreshMinutes: manifestRefresh,
       })
       setConfig(saved)
       setExcludesText(saved.excludes.join('\n'))
       setAgentPaths(saved.agentPaths || {})
+      setManifestRepo(saved.manifestRepo || '')
+      setManifestRefresh(saved.manifestRefreshMinutes ?? 60)
       setHotkey(saved.searchHotkey || '/')
       setMsg('已保存，服务端已自动重扫（排除规则即时生效）')
       onSaved?.()
@@ -250,6 +258,36 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>适配器清单（远端仓库）</h3>
+        <div className="stats-body scan-setting" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="hint">
+            声明式适配器清单的三源合并优先级：本机用户目录 &gt; 远端仓库 &gt; 内置。填入 http/https 仓库 URL 后，
+            会定时拉取清单以接入新工具；拉取失败自动回退本地缓存。留空 = 关闭远端拉取。
+          </div>
+          <input
+            className="settings-input"
+            style={{ width: '100%' }}
+            value={manifestRepo}
+            placeholder="如 https://example.com/agentsessions-manifests（留空关闭）"
+            onChange={(e) => setManifestRepo(e.target.value)}
+            spellCheck={false}
+          />
+          <div className="scan-setting">
+            <span>刷新间隔</span>
+            <input
+              className="settings-number"
+              type="number"
+              min={0}
+              max={1440}
+              value={manifestRefresh}
+              onChange={(e) => setManifestRefresh(Math.max(0, Math.min(1440, Number(e.target.value) || 0)))}
+            />
+            <span>分钟（0 = 不自动拉取，仅用已有缓存）</span>
+          </div>
         </div>
       </div>
 

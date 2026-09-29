@@ -147,6 +147,9 @@ export interface AppConfig {
   agentPaths: Record<string, string>
   maxFileSizeMB: number
   searchHotkey: string
+  // 远端适配器清单仓库（空 = 关闭远端拉取，仅用内置/用户目录清单）
+  manifestRepo: string
+  manifestRefreshMinutes: number
 }
 
 // 会话定位（搜索命中跳转）：轮次 + 高亮词
