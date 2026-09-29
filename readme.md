@@ -2,7 +2,7 @@
 
 本地优先的 AI 编码会话统一索引与检索工具。
 
-自动发现本机已安装的 coding agent（Claude Code、OpenCode、WorkBuddy、Trae 等），把散落各处的会话记录统一索引到一起，按项目聚合、按账号区分，支持从标题到思考过程的分层全文搜索——让你随时找回"那个活是在哪个工具里干的、当时是怎么聊的"。
+自动发现本机已安装的 coding agent（Claude Code、OpenCode、WorkBuddy、Trae、Gemini CLI、Cline、Cursor 等 19 种），把散落各处的会话记录统一索引到一起，按项目聚合、按账号区分，支持从标题到思考过程的分层全文搜索——让你随时找回"那个活是在哪个工具里干的、当时是怎么聊的"。
 
 **全部数据留在本机，不上传、不联网。**
 
@@ -57,18 +57,34 @@
 
 ## 支持的 AI 工具
 
-| 工具        | 状态        | 说明                                                       |
-| ----------- | ----------- | ---------------------------------------------------------- |
-| Claude Code | ✅ 完整支持 | 读取`~/.claude/projects`，含思考过程、工具调用、文件变更 |
-| OpenCode    | ✅ 完整支持 | 读取`~/.local/share/opencode`                            |
-| WorkBuddy   | ✅ 完整支持 | 读取`~/.workbuddy/projects`                              |
-| Trae        | ✅ 完整支持 | 读取（`~/.trae-cn/memory/projects`）                     |
-| Codex       | ✅ 基础支持 | 读取`~/.codex/sessions`，解析 rollout JSONL 格式         |
-| CodeBuddy   | ✅ 基础支持 | 读取`~/.codebuddy/projects`，解析 transcript JSONL 格式  |
-| Lingma      | ✅ 基础支持 | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件             |
-| TraeWork    | ✅ 基础支持 | 读取`AppData/Roaming/TRAE SOLO CN`，尝试解析会话文件     |
+适配器分两类：**硬编码**（JS 适配器，一 agent 一文件）与**声明式清单**（JSON manifest 驱动通用格式引擎，无需写代码）；数据格式为私有加密的工具以占位状态支持（检测到安装但不解析内容）。详细解析方案见 [docs/agentList.md](docs/agentList.md)。
 
-未识别 cwd 的会话归入"未分类"项目，不会丢弃；自定义安装路径可在设置页手动指定。
+| 工具              | 状态           | 说明                                                                 |
+| ----------------- | -------------- | -------------------------------------------------------------------- |
+| Claude Code       | ✅ 完整支持   | 读取`~/.claude/projects`，含思考过程、工具调用、文件变更            |
+| OpenCode          | ✅ 完整支持   | 读取`~/.local/share/opencode`（SQLite 主通道）                       |
+| WorkBuddy         | ✅ 完整支持   | 读取`~/.workbuddy/projects`（国内/海外双数据目录）                   |
+| Trae              | ✅ 完整支持   | 读取`~/.trae-cn`（hook 通道）                                        |
+| Gemini CLI        | ✅ 完整支持   | 新旧双格式兼容（新版 JSONL + 旧版信封 JSON）                         |
+| Cline             | ✅ 完整支持   | `~/.cline/data/tasks/`（三端共用）+ 旧版 VS Code globalStorage 兜底 |
+| Roo Code          | ✅ 完整支持   | 与 Cline 共享任务解析，checkpoint git 目录自动跳过                   |
+| Codex CLI         | ✅ 基础支持   | 读取`~/.codex/sessions`，解析 rollout JSONL 格式                    |
+| CodeBuddy         | ✅ 基础支持   | 读取`~/.codebuddy/projects`，解析 transcript JSONL 格式             |
+| 通义灵码 (Lingma) | ✅ 基础支持   | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件                        |
+| Trae SOLO 桌面版  | ✅ 基础支持   | 读取`AppData/Roaming/TRAE SOLO CN`，加密库能力受限                  |
+| Copilot CLI       | ✅ 基础支持   | events.jsonl 多形状容错 + workspace.yaml 项目关联                    |
+| Copilot VS Code   | ✅ 基础支持   | chatSessions delta journal 重放，cwd 由 workspace.json 解码          |
+| Kiro              | ✅ 基础支持   | SQLite `conversations_v2` 主通道                                     |
+| Cursor            | ✅ 基础支持   | `cursorDiskKV` 容错解析，每库多会话 + 多库遍历                       |
+| MiMo Code         | ✅ 基础支持   | 声明式清单（sqlite 引擎），镜像会话过滤                              |
+| Qwen Code         | ✅ 动态清单   | 声明式清单（jsonl 引擎）接入                                         |
+| Continue.dev      | ✅ 动态清单   | 声明式清单（json 引擎）接入                                          |
+| Aider             | ✅ 动态清单   | 声明式清单（markdown 引擎），按运行分段为多会话；扫描需手动指定目录  |
+| Copilot JetBrains | ⏸ 占位        | 已安装 · 暂不支持索引（数据格式待解）                                |
+| Windsurf          | ⏸ 占位        | 已安装 · 暂不支持索引（Cascade 内容加密）                            |
+| Antigravity       | ⏸ 占位        | 已安装 · 暂不支持索引（加密 SQLite+protobuf）                        |
+
+未识别 cwd 的会话归入"未分类"项目，不会丢弃；自定义安装路径可在设置页手动指定（输入框或目录选择框均可）。
 
 ---
 
@@ -114,9 +130,11 @@ node src/cli.js search "连接池" --depth 3       # 搜索（depth 1=标题 2=�
 | `excludes`        | 排除规则：无通配符按路径包含匹配（贴目录即排除其下所有会话），含`*` `?` `**` 按 glob 匹配，大小写不敏感 | `[]` |
 | `autoScanMinutes` | 自动增量扫描间隔（分钟），`0` 关闭                                                                          | `5`  |
 | `maxFileSizeMB`   | 大文件跳过阈值（MB），`0` 不限制                                                                            | `50` |
-| `agentPaths`      | Agent 会话目录手动指定（路径存在即纳入扫描）                                                                  | `{}` |
+| `agentPaths`      | Agent 会话目录手动指定（路径存在即纳入扫描；设置页支持目录选择框）                                            | `{}` |
 | `accountMapping`  | 账号显示名与工作/个人分类映射                                                                                 | `{}` |
 | `searchHotkey`    | 搜索快捷键                                                                                                    | `/`  |
+| `manifestRepo`    | 远端适配器清单仓库 URL（声明式清单三源合并：用户目录 > 远端 > 内置；仅支持 http/https）                       | 空    |
+| `manifestRefreshMinutes` | 远端清单刷新间隔（分钟）                                                                              | `60` |
 
 索引数据库位于 `~/.agentsessions/agentsessions.db`，删除即重建索引（原始会话文件不受任何影响——本工具只读不改）。
 
@@ -129,20 +147,26 @@ node src/cli.js search "连接池" --depth 3       # 搜索（depth 1=标题 2=�
 ```
 agentSessions/
 ├── src/                  # 核心采集/解析（Node，CommonJS）
-│   ├── detect.js         #   agent 安装检测
-│   ├── scan.js           #   增量扫描调度（mtime+size 指纹）
+│   ├── detect.js         #   agent 安装检测（硬编码优先，清单补位）+ 全量注册表
+│   ├── manifest.js       #   声明式清单：schema 校验 + 三源合并（用户目录 > 远端 > 内置）
+│   ├── engines.js        #   通用格式引擎：jsonl / json / sqlite / external / markdown
+│   ├── scan.js           #   增量扫描调度（mtime+size 指纹；多库遍历 / 外部进程协议 / 单文件多会话）
 │   ├── model.js          #   SQLite schema + 存储层（sessions/turns/subjects + FTS5）
 │   ├── query.js          #   只读查询层（列表/详情/统计）
 │   ├── search.js         #   L1-L4 分层搜索（标题/主题/正文/思考）
-│   ├── config.js         #   ~/.agentsessions/config.json 读写 + 排除规则
+│   ├── config.js         #   ~/.agentsessions/config.json 读写 + 排除规则（agentPaths 白名单动态现算）
 │   ├── purpose.js        #   会话主题归类（L2 种子）
 │   ├── export.js         #   导出 md/json
 │   ├── handoff.js        #   上下文清洗交接
 │   └── cli.js            #   命令行入口
 ├── adapters/             # agent 适配器（一 agent 一文件）
-│   ├── lib.js            #   共享工具：findJsonlFiles / buildSubjects
+│   ├── lib.js            #   共享工具：assembleTurns / buildSubjects / Cline 系任务解析等
+│   ├── manifests/        #   内置声明式清单（qwen-code / continue-dev / mimo-code / aider）
 │   ├── claude-code.js / opencode.js / workbuddy.js / trae.js   # 完整适配器
-│   └── codex.js / codebuddy.js / lingma.js / traework.js       # 基础适配器
+│   ├── codex.js / codebuddy.js / lingma.js / traework.js       # 基础适配器
+│   └── gemini.js / cline.js / roo-code.js / kiro.js / cursor.js
+│       / copilot-cli.js / copilot-vscode.js                    # 基础适配器（新增工具）
+│       / copilot-jetbrains.js / windsurf.js / antigravity.js   # 占位适配器（含解析计划）
 ├── server.js             # REST 桥接（127.0.0.1:18778，原生 http，零框架）
 ├── scripts/
 │   └── pack-backend.js   # 桌面打包：组装自包含后端载荷 → src-tauri/backend/
@@ -168,8 +192,9 @@ node src/cli.js search 关键词 # 命令行搜索
 ### 代码约定
 
 - **后端**：CommonJS，内置模块用 `node:` 前缀；注释用中文；不引第三方依赖（目前唯一依赖 `better-sqlite3`）
-- **前端**：React 函数组件 + hooks；**不新增运行时依赖**（图表纯 CSS、高亮零依赖是刻意为之）
-- **适配器接口**：`sources()` 枚举会话文件 + `parseFile()` 单文件解析为统一会话模型；重复逻辑提取到 `adapters/lib.js`
+- **前端**：React 函数组件 + hooks；除 Tauri 官方插件（如目录选择对话框）外**不新增运行时依赖**（图表纯 CSS、高亮零依赖是刻意为之）
+- **适配器接口**：`sources()` 枚举会话文件 + `parseFile()` 单文件解析为统一会话模型；重复逻辑提取到 [adapters/lib.js](adapters/lib.js)，不要复制粘贴
+- **清单引擎**：声明式清单由 [src/manifest.js](src/manifest.js)（校验 + 三源合并）与 [src/engines.js](src/engines.js)（格式引擎）协作驱动，新格式类工具优先写清单而非硬编码
 - **只读原则**：绝不修改 agent 的原始会话文件
 
 ---
@@ -193,7 +218,7 @@ node src/cli.js search 关键词 # 命令行搜索
 $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; node server.js
 ```
 
-图标
+### 图标
 
 当前用的是`tauri init` 的默认 Tauri 图标，后续想换自己的图标，准备一张 1024×1024 PNG 执行`cd ui && npm run tauri icon <图片路径>` 即可全量替换。
 
@@ -205,6 +230,7 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 | 检测不到某个 agent          | 确认安装路径在支持列表；自定义路径到设置页配置`agentPaths`                                  |
 | 某项目的会话没被索引        | 检查排除规则`excludes` 是否误命中；检查文件是否超过 `maxFileSizeMB`                       |
 | 搜索结果不全                | 渐进披露默认先搜浅层，点"继续搜索正文/思考"或用`depth` 参数搜深层                           |
+| 远端清单拉取失败            | 确认`manifestRepo` 为 http/https URL；桥进程控制台会输出失败原因；失败时自动回退内置/缓存清单 |
 | 端口被占用                  | `AGENTSESSIONS_PORT` 换端口，或找到占用进程                                                 |
 | 数据乱了想重来              | 删除`~/.agentsessions/agentsessions.db` 重新扫描即可，原始会话文件无损                      |
 
@@ -248,20 +274,26 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 
 ## 贡献
 
-欢迎贡献，特别是**新 agent 适配器**——这是本工具的核心生态。
+欢迎贡献，特别是**新 agent 适配器**——这是本工具的核心生态。接入方式按优先级：**声明式清单 > 硬编码适配器 > 占位适配器**。
 
-### 新增一个适配器
+### 方式一：声明式清单（优先，无需写代码）
+
+会话数据是规整 JSONL / JSON / SQLite / Markdown 之一的工具，写一个 JSON 清单即可接入：
+
+1. **编写清单**：参考 [adapters/manifests/](adapters/manifests) 下的内置示例（`qwen-code.json` / `continue-dev.json` / `mimo-code.json` / `aider.json`），声明 agent id、检测规则、格式引擎与字段映射
+2. **本地验证**：放到 `~/.agentsessions/adapters/`（用户清单目录，优先级最高），`node src/cli.js detect` 确认识别 → 扫描验证
+3. **合入内置**：PR 提交到 `adapters/manifests/`；也可配置 `manifestRepo` 指向远端仓库动态分发（远端清单出于安全考虑不允许声明 external 引擎）
+
+### 方式二：硬编码适配器
+
+数据格式复杂（多形状容错、多库遍历、重放逻辑等，参考 `claude-code.js` / `cursor.js`）：
 
 1. **注册检测**：在 [src/detect.js](src/detect.js) 的 `AGENTS` 中添加安装检测（目录存在 / 可执行文件存在即视为已安装）
 2. **实现适配器** [adapters/&lt;agentId&gt;.js](adapters)：
-   - **完整适配器**（参考 `claude-code.js`）：导出 `id` / `label` / `sourceDir` / `sourceFormat` / `sources()`（枚举会话文件）/ `parseFile()`（解析为统一会话模型：session + project + turns + subjects）
-   - **基础适配器**（参考 `codex.js`）：导出 `id` / `label` / `sourceDir` / `sourceFormat` / `sources()` / `parseFile()`，提供基础会话解析支持
-   - **占位适配器**（参考旧版 `codex.js`）：只导出 `id` / `label` / `placeholder` / `plan`（解析思路备注），设置页会显示"已安装 · 暂不支持索引"
-   - 通用逻辑用 [adapters/lib.js](adapters/lib.js) 的 `findJsonlFiles` / `buildSubjects`，不要复制粘贴
-3. **同步三处清单**（新增 agent 必须三处一致）：
-   - `src/detect.js` 的 `AGENTS`
-   - `src/config.js` 的 `KNOWN_AGENTS`（agentPaths 白名单）
-   - `ui/src/views/SettingsView.tsx` 的 `AGENT_LIST`
+   - **完整/基础适配器**（参考 `claude-code.js` / `codex.js`）：导出 `id` / `label` / `sourceDir` / `sourceFormat` / `sources()`（枚举会话文件）/ `parseFile()`（解析为统一会话模型：session + project + turns + subjects）
+   - **占位适配器**（参考 `windsurf.js`）：只导出 `id` / `label` / `placeholder` / `plan`（解析思路备注），设置页会显示"已安装 · 暂不支持索引"
+   - 通用逻辑用 [adapters/lib.js](adapters/lib.js) 的 `assembleTurns` / `buildSubjects` / `parseClineStyleTaskDir` 等，不要复制粘贴
+3. **清单同步**：`agentPaths` 白名单与设置页 agent 列表均为动态生成（`src/config.js` 的 `knownAgents()` 与 `detect.js` 的 `agentRegistry()` 自动并入），无需手工维护；硬编码 agent 只要注册进 `AGENTS` 即全部生效
 4. **验证**：`node src/cli.js detect` 确认检测 → `node src/cli.js scan --db <临时库>` 确认解析数量与轮次 → `node src/cli.js search <关键词> --db <临时库>` 确认可搜 → 清理临时文件
 
 ### 提交前检查
