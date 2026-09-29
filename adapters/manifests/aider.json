@@ -1,0 +1,17 @@
+{
+  "manifestVersion": 1,
+  "id": "aider",
+  "label": "Aider",
+  "sourceFormat": "markdown/aider-history",
+  "engine": "markdown",
+  "source": {
+    "fileName": ".aider.chat.history.md"
+  },
+  "markdown": {
+    "runHeading": "^# aider chat started at (.+)$",
+    "headingLevel": 4,
+    "roleHeadings": { "user": "user", "assistant": "assistant" },
+    "ignoreHeadings": ["system"],
+    "filters": ["^>\\s?Tokens:"]
+  }
+}

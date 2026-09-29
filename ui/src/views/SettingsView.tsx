@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { fetchAccounts, fetchConfig, saveConfig, fetchStats } from '../api'
+import { open } from '@tauri-apps/plugin-dialog'
+import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect } from '../api'
 import { eventToHotkey, formatHotkey } from '../hotkey'
 import { IS_TAURI } from '../lib'
 import type { Account, AppConfig, DetectedAgent } from '../types'
 
 const KINDS = ['other', 'work', 'personal']
-// 与 src/detect.js 的 AGENTS 清单保持一致（id + 显示名）
-const AGENT_LIST: { id: string; label: string }[] = [
+// Agent 注册表回退值（服务端 /api/detect 不可达时兜底）；正常以服务端全量注册表为准
+//（含新适配器与清单 agent，未安装的也露出配置行）
+const FALLBACK_AGENT_LIST: { id: string; label: string }[] = [
   { id: 'opencode', label: 'OpenCode' },
   { id: 'claude-code', label: 'Claude Code' },
   { id: 'workbuddy', label: 'WorkBuddy' },
@@ -34,8 +36,10 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
   const [recording, setRecording] = useState(false)
   // 账号映射编辑态：key `${agentId}::${rawName}` → { displayName, kind }
   const [mapping, setMapping] = useState<Record<string, { displayName: string; kind: string }>>({})
-  // 最近一次扫描探测到的 agent 明细（含"已安装未索引"）
+  // 最近一次扫描探测到的 agent 明细（含"已安装未索引"/"扫描失败"）
   const [detected, setDetected] = useState<DetectedAgent[]>([])
+  // Agent 注册表（服务端全量，含清单 agent）；加载失败回退内置 8 个
+  const [agentList, setAgentList] = useState(FALLBACK_AGENT_LIST)
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
@@ -51,6 +55,7 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
     }).catch((e) => setErr(String(e)))
     fetchAccounts().then(setAccounts).catch(() => {})
     fetchStats(1).then((d) => setDetected(d.agents || [])).catch(() => {})
+    fetchDetect().then((d) => { if (d.registry && d.registry.length) setAgentList(d.registry) }).catch(() => {})
   }, [])
 
   // 用账号列表 + 现有映射初始化编辑态（accounts 异步到达后）
@@ -88,10 +93,11 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
         if (!m) continue
         accountMapping[key] = { displayName: m.displayName.trim() || a.rawName, kind: m.kind }
       }
-      // agentPaths 仅提交非空值（空 = 使用默认探测目录）；键限已知 agent
+      // agentPaths 仅提交非空值（空 = 使用默认探测目录）。遍历状态全部键而非仅 agentList：
+      // 设置页未展示的 agent（运行期新增清单等）既有配置原样保留，避免保存时被静默清掉
       const nextPaths: Record<string, string> = {}
-      for (const { id } of AGENT_LIST) {
-        const v = (agentPaths[id] || '').trim()
+      for (const [id, v0] of Object.entries(agentPaths)) {
+        const v = (v0 || '').trim()
         if (v) nextPaths[id] = v
       }
       const saved = await saveConfig({
@@ -194,16 +200,19 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
           </div>
           <table className="settings-table">
             <tbody>
-              {AGENT_LIST.map(({ id, label }) => {
+              {agentList.map(({ id, label }) => {
                 const d = detected.find((x) => x.id === id)
                 const unsupported = d?.status === 'placeholder'
+                const failed = d?.status === 'error'
                 return (
                   <tr key={id}>
-                    <td className="settings-agent">
+                    <td className="settings-agent" style={{ width: '200px' }}>
                       {label}
                       {d && (
-                        <span className={`meta-tag ${unsupported ? 'agent-dim' : ''}`} style={{ marginLeft: 6 }}>
-                          {unsupported ? '已安装 · 暂不支持索引' : `已索引 ${d.sessions ?? 0} 会话`}
+                        <span className={`meta-tag ${unsupported || failed ? 'agent-dim' : ''}`} style={{ marginLeft: 6 }} title={failed ? d.error : undefined}>
+                          {failed
+                            ? `扫描失败：${d.error || '未知错误'}`
+                            : unsupported ? '已安装 · 暂不支持索引' : `已索引 ${d.sessions ?? 0} 会话`}
                         </span>
                       )}
                     </td>
@@ -211,14 +220,29 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
                       {unsupported ? (
                         <span className="hint">会话为私有格式，暂无法读取内容</span>
                       ) : (
-                        <input
-                          className="settings-input"
-                          style={{ width: '100%' }}
-                          value={agentPaths[id] || ''}
-                          placeholder="留空自动探测"
-                          onChange={(e) => setAgentPaths((p) => ({ ...p, [id]: e.target.value }))}
-                          spellCheck={false}
-                        />
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            className="settings-input"
+                            style={{ flex: 1, minWidth: 0 }}
+                            value={agentPaths[id] || ''}
+                            placeholder="留空自动探测"
+                            onChange={(e) => setAgentPaths((p) => ({ ...p, [id]: e.target.value }))}
+                            spellCheck={false}
+                          />
+                          <button
+                            className="scan-btn mini-btn"
+                            style={{ flexShrink: 0 }}
+                            title="打开系统目录选择框"
+                            onClick={async () => {
+                              try {
+                                const dir = await open({ directory: true, multiple: false, title: `选择 ${label} 会话根目录` })
+                                if (typeof dir === 'string' && dir) setAgentPaths((p) => ({ ...p, [id]: dir }))
+                              } catch { /* 用户取消或对话框不可用：保留原值 */ }
+                            }}
+                          >
+                            浏览…
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>

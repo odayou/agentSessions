@@ -35,7 +35,7 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 }
 .tab.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; border-color: #b6d7ff; }
 .spacer { flex: 1; }
-.scan-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); cursor: pointer; font-size: 13px; }
+.scan-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--accent-bg); cursor: pointer; font-size: 13px; }
 .scan-btn:hover { background: var(--bg); }
 .status { font-size: 12px; color: var(--muted); }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
@@ -221,7 +221,7 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 .settings-number { width: 72px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
 .settings-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .settings-table td { padding: 6px 8px; border-bottom: 1px solid #eaeef2; vertical-align: middle; }
-.settings-agent { width: 90px; color: var(--muted); }
+.settings-agent { width: 200px; color: var(--muted); }
 .settings-raw { width: 140px; color: var(--muted); word-break: break-all; }
 .settings-input { width: 180px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 13px; }
 .settings-actions { display: flex; align-items: center; gap: 14px; margin-top: 4px; }

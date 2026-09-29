@@ -1,0 +1,30 @@
+{
+  "manifestVersion": 1,
+  "id": "qwen-code",
+  "label": "Qwen Code",
+  "sourceFormat": "qwen-jsonl",
+  "engine": "jsonl",
+  "detect": {
+    "dirs": ["~/.qwen/projects"],
+    "bins": ["qwen"]
+  },
+  "source": {
+    "root": "~/.qwen/projects",
+    "ext": ".jsonl",
+    "cwdFromPath": true
+  },
+  "session": {
+    "id": "sessionId",
+    "cwd": "cwd",
+    "model": "model",
+    "ts": "timestamp"
+  },
+  "rules": [
+    { "when": { "type": "user" }, "role": "user", "text": ["content", "text", "message.content"] },
+    { "when": { "type": "gemini" }, "role": "assistant", "text": ["content", "text", "message.content"] },
+    { "when": { "type": "assistant" }, "role": "assistant", "text": ["content", "text", "message.content"] },
+    { "when": { "type": "thinking" }, "role": "thinking", "text": ["thought", "content", "text"] },
+    { "when": { "type": "tool_use" }, "role": "tool", "name": "name", "input": "arguments" },
+    { "when": { "type": "ai-title" }, "role": "title", "text": "aiTitle" }
+  ]
+}

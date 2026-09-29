@@ -6,7 +6,7 @@ const path = require('node:path')
 const { defaultDbPath } = require('./src/index')
 const { runScan } = require('./src/scan')
 const { search } = require('./src/search')
-const { detectAll } = require('./src/detect')
+const { detectAll, agentRegistry } = require('./src/detect')
 const { cleanContext } = require('./src/handoff')
 const { exportSession } = require('./src/export')
 const config = require('./src/config')
@@ -29,7 +29,8 @@ function autoScan(trigger) {
     const r = runScan(DB_PATH)
     lastAutoScanAt = Date.now()
     lastScanAt = lastAutoScanAt
-    if (r.ok) lastAgents = r.stats.agents || []
+    // 无论成败都更新明细：失败 agent（status:'error'）也要让设置页看到真实状态
+    lastAgents = (r.stats && r.stats.agents) || []
     if (!r.ok) console.error(`[agentsessions] 自动扫描失败：${r.error}`)
     else if (r.stats.sessions > 0) {
       console.log(`[agentsessions] ${trigger}增量扫描：新收录 ${r.stats.sessions} 会话`)
@@ -97,14 +98,15 @@ async function handle(req, res) {
     switch (p) {
       case '/api/detect': {
         const detected = detectAll()
-        send(res, 200, { ok: true, agents: detected })
+        // registry：全量 agent 注册表（硬编码 + 清单，不按探测过滤），设置页 agentPaths 配置列表用
+        send(res, 200, { ok: true, agents: detected, registry: agentRegistry() })
         return
       }
       case '/api/scan': {
         // POST 触发扫描（异步走会耗时，这里同步完成）
         const res2 = runScan(DB_PATH, { only: qs.only })
         lastScanAt = Date.now()
-        if (res2.ok) lastAgents = res2.stats.agents || []
+        lastAgents = (res2.stats && res2.stats.agents) || [] // 失败也更新（含 status:'error' 明细）
         if (!res2.ok) { send(res, 500, { ok: false, error: res2.error, stats: res2.stats }); return }
         send(res, 200, { ok: true, stats: res2.stats })
         return

@@ -125,13 +125,14 @@ export interface Stats {
   byDay: { day: string; n: number }[]
 }
 
-// 最近一次扫描探测到的 agent 明细（placeholder = 已安装但暂不支持内容索引）
+// 最近一次扫描探测到的 agent 明细（placeholder = 已安装但暂不支持索引；error = 扫描失败）
 export interface DetectedAgent {
   id: string
   label: string
-  status: 'ok' | 'placeholder'
+  status: 'ok' | 'placeholder' | 'error'
   sessions?: number
   turns?: number
+  error?: string
 }
 
 // M4 配置（/api/config）

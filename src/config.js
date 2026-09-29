@@ -14,14 +14,23 @@
 //     路径存在即生效（未安装该 agent 也会纳入扫描）；仅支持已知 agent id
 //   maxFileSizeMB  大文件保护阈值（MB，超过跳过不索引；0=关闭；默认 50）
 //   searchHotkey   搜索快捷键（热键字符串：'/'、'f3'、'ctrl+k'；默认 '/'；设置页录入）
+//   manifestRepo   远端清单仓库 URL（agentList §6.2；空=关闭；定时拉取失败回退本地缓存）
+//   manifestRefreshMinutes 远端清单刷新间隔（分钟，0=不拉取仅用缓存；默认 60）
 const path = require('node:path')
 const fs = require('node:fs')
 const os = require('node:os')
 
 // saveConfig 允许写入的白名单键（防止越权字段混入）
-const WRITABLE_KEYS = ['accountMapping', 'excludes', 'autoScanMinutes', 'agentPaths', 'maxFileSizeMB', 'searchHotkey']
-// 支持手动配置会话目录的 agent（与 src/detect.js 的 AGENTS 清单保持一致）
-const KNOWN_AGENTS = ['opencode', 'claude-code', 'workbuddy', 'trae', 'traework', 'codebuddy', 'lingma', 'codex']
+const WRITABLE_KEYS = ['accountMapping', 'excludes', 'autoScanMinutes', 'agentPaths', 'maxFileSizeMB', 'searchHotkey', 'manifestRepo', 'manifestRefreshMinutes']
+// 支持手动配置会话目录的 agent（与 src/detect.js 的 AGENTS 清单动态保持一致；
+// 声明式清单声明的 agent id 动态并入——agentList §6.2，加载失败回退仅内置）。
+// 每次调用现算（不做模块级缓存）：服务运行期间新增的用户清单 agent 也能立即进入白名单
+function knownAgents() {
+  const ids = []
+  try { ids.push(...Object.keys(require('./detect').AGENTS)) } catch { /* detect 不可用则忽略 */ }
+  try { ids.push(...require('./manifest').manifestIds()) } catch { /* 清单不可用则忽略 */ }
+  return [...new Set(ids)]
+}
 
 function configPath() {
   return path.join(os.homedir(), '.agentsessions', 'config.json')
@@ -42,7 +51,7 @@ function loadConfig() {
 function normalize(c) {
   const paths = {}
   if (c.agentPaths && typeof c.agentPaths === 'object' && !Array.isArray(c.agentPaths)) {
-    for (const k of KNOWN_AGENTS) {
+    for (const k of knownAgents()) {
       const v = c.agentPaths[k]
       if (typeof v === 'string' && v.trim()) paths[k] = v.trim()
     }
@@ -54,6 +63,8 @@ function normalize(c) {
     agentPaths: paths,
     maxFileSizeMB: Number.isFinite(Number(c.maxFileSizeMB)) && Number(c.maxFileSizeMB) >= 0 ? Number(c.maxFileSizeMB) : 50,
     searchHotkey: (typeof c.searchHotkey === 'string' && c.searchHotkey.trim()) ? c.searchHotkey.trim().toLowerCase().slice(0, 40) : '/',
+    manifestRepo: typeof c.manifestRepo === 'string' ? c.manifestRepo.trim() : '',
+    manifestRefreshMinutes: Number.isFinite(Number(c.manifestRefreshMinutes)) && Number(c.manifestRefreshMinutes) >= 0 ? Number(c.manifestRefreshMinutes) : 60,
   }
 }
 

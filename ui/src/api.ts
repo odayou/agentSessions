@@ -26,6 +26,10 @@ async function get<T>(path: string): Promise<T> {
 export function fetchProjects() { return get<{ projects: Project[] }>('/projects').then(d => d.projects) }
 export function fetchAccounts() { return get<{ accounts: Account[] }>('/accounts').then(d => d.accounts) }
 export function fetchAgents() { return get<{ agents: AgentStat[] }>('/agents').then(d => d.agents) }
+// 探测明细 + 全量 agent 注册表（硬编码 + 清单，未安装也露出，设置页 agentPaths 列表用）
+export function fetchDetect() {
+  return get<{ agents: DetectedAgent[]; registry: { id: string; label: string }[] }>('/detect')
+}
 
 export function fetchSessions(f: { project?: string; account?: string; agent?: string; q?: string } = {}) {
   const p = new URLSearchParams()

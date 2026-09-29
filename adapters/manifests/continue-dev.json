@@ -1,0 +1,24 @@
+{
+  "manifestVersion": 1,
+  "id": "continue-dev",
+  "label": "Continue",
+  "sourceFormat": "continue-json",
+  "engine": "json",
+  "detect": {
+    "dirs": ["~/.continue/sessions"]
+  },
+  "source": {
+    "root": "~/.continue/sessions",
+    "ext": ".json"
+  },
+  "session": {
+    "cwd": "workspaceDirectory",
+    "title": "title",
+    "model": "chatModelTitle",
+    "messagesPath": "history"
+  },
+  "rules": [
+    { "when": { "role": "user" }, "role": "user", "text": "content" },
+    { "when": { "role": "assistant" }, "role": "assistant", "text": "content" }
+  ]
+}

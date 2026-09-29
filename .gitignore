@@ -39,3 +39,4 @@ _probe*.py
 .idea/
 .DS_Store
 Thumbs.db
+*.stackdump

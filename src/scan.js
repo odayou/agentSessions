@@ -2,6 +2,8 @@
 // 采集编排：detect → 各已装 agent 适配器 → 统一落库（增量优先：按源文件 mtime+size 指纹跳过未变更）
 const fs = require('node:fs')
 const { detectAll, AGENTS } = require('./detect')
+const manifest = require('./manifest')
+const engines = require('./engines')
 const { openStore } = require('./model')
 const store = require('./store')
 const config = require('./config')
@@ -16,6 +18,16 @@ const ADAPTERS = {
   codebuddy: './../adapters/codebuddy',
   lingma: './../adapters/lingma',
   codex: './../adapters/codex',
+  gemini: './../adapters/gemini',
+  'copilot-cli': './../adapters/copilot-cli',
+  cline: './../adapters/cline',
+  'roo-code': './../adapters/roo-code',
+  kiro: './../adapters/kiro',
+  cursor: './../adapters/cursor',
+  windsurf: './../adapters/windsurf',
+  'copilot-vscode': './../adapters/copilot-vscode',
+  'copilot-jetbrains': './../adapters/copilot-jetbrains',
+  antigravity: './../adapters/antigravity',
 }
 
 // 把一批 session item 落库；返回 { sessions, turns }（项目 cwd 命中排除规则则跳过）
@@ -77,12 +89,13 @@ function isChanged(db, agentId, file, maxSizeMB) {
 // 扫描链路，返回统计；opts.cfg 可注入配置（点测用，缺省读全局配置）
 function runScan(dbPath, { only, cfg } = {}) {
   const db = openStore(dbPath)
-  const detected = detectAll()
   const cfg2 = cfg || config.loadConfig()
-  // agentPaths 手动配置（readme §F：自定义目录优先于自动检测；路径存在的未装 agent 也纳入扫描）
+  const detected = detectAll(cfg2)
+  // agentPaths 手动配置（readme §F：自定义目录优先于自动检测；路径存在的未装 agent 也纳入扫描，
+  // 支持清单声明的 agent id——agentList §6.2）
   for (const [id, p] of Object.entries(cfg2.agentPaths || {})) {
-    if (ADAPTERS[id] && fs.existsSync(p) && !detected.find((d) => d.id === id)) {
-      detected.push({ id, label: AGENTS[id].label })
+    if ((ADAPTERS[id] || manifest.hasAdapter(id, cfg2)) && fs.existsSync(p) && !detected.find((d) => d.id === id)) {
+      detected.push({ id, label: (AGENTS[id] && AGENTS[id].label) || manifest.labelOf(id, cfg2) || id })
     }
   }
   const maxMB = cfg2.maxFileSizeMB
@@ -93,9 +106,22 @@ function runScan(dbPath, { only, cfg } = {}) {
     if (excluded > 0) stats.excluded = excluded
     for (const { id } of detected) {
       if (only && id !== only) continue
-      const adapterPath = ADAPTERS[id]
-      if (!adapterPath) continue
-      const adapter = require(adapterPath)
+      // agent 注册表条目：硬编码 AGENTS 优先，清单 agent 补位（agentList §6.2）
+      const ag = AGENTS[id] || manifest.entryFor(id, cfg2) || {}
+      // 适配器解析：硬编码模块优先；无硬编码时按清单经通用格式引擎驱动。
+      // per-agent 隔离：单个清单/适配器构造失败（如非法正则）只降级该 agent，不中断整次扫描
+      let adapter = null
+      try {
+        if (ADAPTERS[id]) adapter = require(ADAPTERS[id])
+        else {
+          const m = manifest.manifestOf(id, cfg2)
+          if (m) adapter = engines.adapterFor(m)
+        }
+      } catch (e) {
+        stats.agents.push({ id, label: ag.label || id, status: 'error', error: '适配器加载失败：' + e.message })
+        continue
+      }
+      if (!adapter) continue
       if (adapter.placeholder) {
         stats.agents.push({ id, label: adapter.label, status: 'placeholder' })
         continue
@@ -103,23 +129,50 @@ function runScan(dbPath, { only, cfg } = {}) {
 
       let sc = 0
       let tc = 0
-      if (AGENTS[id].dbCandidates) {
-        // sqlite 源（opencode）：整个库一次性扫描 + 记录该库文件指纹；手动路径优先
+      if (ag.dbCandidates) {
+        // sqlite 源（opencode/cursor/kiro）：遍历全部存在的候选库逐库扫描 + 记录各库文件指纹；
+        // 每库可含多个会话（cursor/kiro），手动路径优先；单库解析失败（schema 漂移/损坏）
+        // 不中断整体扫描，降级记录错误（agentList §五：解析失败时容错降级）
         const manual = (cfg2.agentPaths || {})[id]
-        const candidates = [manual, ...AGENTS[id].dbCandidates()].filter(Boolean)
-        const dbFile = candidates.find((p) => fs.existsSync(p))
-        if (dbFile && !config.isExcluded(cfg2, dbFile) && isChanged(db, id, dbFile, maxMB)) {
-          const r = persist(db, id, adapter, adapter.scan(dbFile), cfg2)
+        const candidates = [manual, ...ag.dbCandidates()].filter(Boolean)
+        let scanErr = null
+        for (const dbFile of candidates) {
+          if (!fs.existsSync(dbFile) || config.isExcluded(cfg2, dbFile)) continue
+          if (!isChanged(db, id, dbFile, maxMB)) continue // 未变更/超大库跳过
+          try {
+            const r = persist(db, id, adapter, adapter.scan(dbFile), cfg2)
+            sc += r.sessions; tc += r.turns
+          } catch (e) {
+            scanErr = e.message
+          }
+        }
+        if (scanErr && !sc && !tc) {
+          stats.agents.push({ id, label: adapter.label, status: 'error', error: scanErr })
+          continue
+        }
+      } else if (adapter.scanAll) {
+        // 外部进程源（agentList §6.2 协议）：一次性扫描，无文件指纹可增量；失败不中断整体扫描
+        try {
+          const r = persist(db, id, adapter, adapter.scanAll(), cfg2)
           sc = r.sessions; tc = r.turns
+        } catch (e) {
+          stats.agents.push({ id, label: adapter.label, status: 'error', error: e.message })
+          continue
         }
       } else if (adapter.sources && adapter.parseFile) {
-        // jsonl 目录源（workbuddy/trae）：逐文件指纹，仅解析已变更文件；手动路径优先
-        const root = (cfg2.agentPaths || {})[id] || adapter.sourceDir || AGENTS[id].sourceDir()
-        for (const file of adapter.sources(root)) {
+        // jsonl/json 目录源（claude-code/workbuddy/cline/aider 等）：逐文件指纹，仅解析已变更文件；
+        // parseFile 可返回单会话或会话数组（aider 单文件多运行 → 多会话）；手动路径优先
+        const root = (cfg2.agentPaths || {})[id] || adapter.sourceDir || (ag.sourceDir ? ag.sourceDir() : null)
+        for (const file of (root ? adapter.sources(root) : [])) {
           if (config.isExcluded(cfg2, file)) continue // 按源文件路径排除
           if (!isChanged(db, id, file, maxMB)) continue // 未变更/超大文件跳过
-          const item = adapter.parseFile(file)
-          if (item) {
+          // per-file 隔离：单文件解析抛错只跳过该文件（记日志），不拖垮整次扫描
+          let out = null
+          try { out = adapter.parseFile(file) } catch (e) {
+            console.error(`[agentsessions] ${id} 解析源文件失败 ${file}：${e.message}`)
+            continue
+          }
+          for (const item of (Array.isArray(out) ? out : (out ? [out] : []))) {
             const r = persist(db, id, adapter, [item], cfg2)
             sc += r.sessions; tc += r.turns
           }

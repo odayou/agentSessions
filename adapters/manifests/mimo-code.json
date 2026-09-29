@@ -1,0 +1,37 @@
+{
+  "manifestVersion": 1,
+  "id": "mimo-code",
+  "label": "MiMo Code",
+  "sourceFormat": "sqlite/opencode-fork",
+  "engine": "sqlite",
+  "detect": {
+    "dirs": ["~/.local/share/mimocode"]
+  },
+  "sqlite": {
+    "candidates": ["~/.local/share/mimocode/mimocode.db"],
+    "session": {
+      "table": "session",
+      "id": "id",
+      "cwd": "directory",
+      "title": "title",
+      "createdAt": "time_created",
+      "updatedAt": "time_updated"
+    },
+    "message": {
+      "table": "message",
+      "id": "id",
+      "sessionId": "session_id",
+      "data": "data",
+      "time": "time_created"
+    },
+    "part": {
+      "table": "part",
+      "messageId": "message_id",
+      "data": "data"
+    },
+    "mirrorTables": [
+      { "table": "claude_import", "column": "session_id" },
+      { "table": "external_import", "column": "session_id" }
+    ]
+  }
+}

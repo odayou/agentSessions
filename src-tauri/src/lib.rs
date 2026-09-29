@@ -95,6 +95,7 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init()) // 系统目录选择框（设置页「浏览…」）
         .invoke_handler(tauri::generate_handler![toggle_devtools])
         .setup(|app| {
             let child = spawn_bridge(app.handle());
