@@ -4,7 +4,9 @@
 
 自动发现本机已安装的 coding agent（Claude Code、OpenCode、WorkBuddy、Trae、Gemini CLI、Cline、Cursor 等 19 种），把散落各处的会话记录统一索引到一起，按项目聚合、按账号区分，支持从标题到思考过程的分层全文搜索——让你随时找回"那个活是在哪个工具里干的、当时是怎么聊的"。
 
-**全部数据留在本机，不上传、不联网。**
+A local-first unified index and search tool for AI coding sessions. It automatically discovers the coding agents installed on your machine (Claude Code, OpenCode, WorkBuddy, Trae, Gemini CLI, Cline, Cursor, and 14 more — 19 in total), indexes all your scattered session records in one place, groups them by project and account, and supports layered full-text search from titles down to thinking traces — so you can always find "which tool did that task, and how exactly did I discuss it back then".
+
+**全部数据留在本机，不上传、不联网。**（All data stays on your machine — nothing is uploaded, nothing goes online.）
 
 ---
 
