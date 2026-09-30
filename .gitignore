@@ -40,3 +40,9 @@ _probe*.py
 .DS_Store
 Thumbs.db
 *.stackdump
+
+docs/private/*
+
+docs/*
+
+.trae/*

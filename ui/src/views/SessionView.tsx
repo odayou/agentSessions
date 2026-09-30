@@ -387,7 +387,7 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
         ))}
         <label className="auto-toggle" title="把当前过滤选择保存为所有会话详情的默认展示">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-          复用为全局习惯
+          保持此偏好
         </label>
       </div>
       {deferredQ && matchedTurns.length === 0 && (
