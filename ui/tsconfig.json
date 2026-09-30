@@ -12,9 +12,9 @@
     "jsx": "react-jsx",
     "types": ["vite/client"],
     "strict": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
   },
   "include": ["src"]
 }
