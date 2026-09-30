@@ -70,11 +70,17 @@ function persist(db, id, adapter, sessions, cfg) {
 }
 
 // 源文件指纹：mtime(ms)+size，未记录或变更则返回 true
-// maxSizeMB > 0 时超大文件直接返回 false（跳过解析，不记指纹，调大阈值后可重新索引）
-function isChanged(db, agentId, file, maxSizeMB) {
+// maxSizeMB > 0 时超大文件直接返回 false（跳过解析，不记指纹，调大阈值后可重新索引）；
+// oversized 传入时收集被跳过的大文件（供统计与告警，跳过不再静默）。
+// enforceMaxSize=false 用于 SQLite 主通道库（opencode/kiro/cursor）：单库承载该 agent 全部会话，
+// 库体积增长是常态，按大小阈值跳过等于整个 agent 永久失效（只按 mtime+size 指纹增量）
+function isChanged(db, agentId, file, maxSizeMB, oversized, enforceMaxSize = true) {
   try {
     const st = fs.statSync(file)
-    if (maxSizeMB > 0 && st.size > maxSizeMB * 1024 * 1024) return false
+    if (enforceMaxSize && maxSizeMB > 0 && st.size > maxSizeMB * 1024 * 1024) {
+      if (oversized) oversized.push({ agentId, file, sizeMB: Math.round(st.size / 1024 / 1024) })
+      return false
+    }
     const mtime = st.mtimeMs
     const size = st.size
     const prev = store.getScanState(db, file)
@@ -100,6 +106,7 @@ function runScan(dbPath, { only, cfg } = {}) {
   }
   const maxMB = cfg2.maxFileSizeMB
   const stats = { agents: [], sessions: 0, turns: 0 }
+  const oversized = [] // 被大文件阈值跳过的源文件（主通道库不受限，仅逐会话文件）
   try {
     // 排除规则（S8）：先清理已索引的命中存量（含指纹），再在采集时跳过命中文件
     const excluded = store.applyExcludes(db, (p) => config.isExcluded(cfg2, p))
@@ -138,7 +145,8 @@ function runScan(dbPath, { only, cfg } = {}) {
         let scanErr = null
         for (const dbFile of candidates) {
           if (!fs.existsSync(dbFile) || config.isExcluded(cfg2, dbFile)) continue
-          if (!isChanged(db, id, dbFile, maxMB)) continue // 未变更/超大库跳过
+          // 主通道库不受 maxFileSizeMB 限制（单库承载全 agent 会话，见 isChanged 注释）
+          if (!isChanged(db, id, dbFile, maxMB, null, false)) continue // 未变更跳过
           try {
             const r = persist(db, id, adapter, adapter.scan(dbFile), cfg2)
             sc += r.sessions; tc += r.turns
@@ -165,7 +173,7 @@ function runScan(dbPath, { only, cfg } = {}) {
         const root = (cfg2.agentPaths || {})[id] || adapter.sourceDir || (ag.sourceDir ? ag.sourceDir() : null)
         for (const file of (root ? adapter.sources(root) : [])) {
           if (config.isExcluded(cfg2, file)) continue // 按源文件路径排除
-          if (!isChanged(db, id, file, maxMB)) continue // 未变更/超大文件跳过
+          if (!isChanged(db, id, file, maxMB, oversized)) continue // 未变更/超大文件跳过
           // per-file 隔离：单文件解析抛错只跳过该文件（记日志），不拖垮整次扫描
           let out = null
           try { out = adapter.parseFile(file) } catch (e) {
@@ -181,6 +189,12 @@ function runScan(dbPath, { only, cfg } = {}) {
       stats.sessions += sc
       stats.turns += tc
       stats.agents.push({ id, label: adapter.label, status: 'ok', sessions: sc, turns: tc })
+    }
+    // 超大文件跳过可见化：写入统计 + 控制台告警（避免"静默不索引"难排查）
+    if (oversized.length) {
+      stats.oversized = oversized.slice(0, 20)
+      console.warn(`[agentsessions] ${oversized.length} 个源文件超过 maxFileSizeMB=${maxMB} 被跳过（可在设置页调大阈值或设为 0 不限制）：` +
+        oversized.slice(0, 5).map((x) => `${x.agentId}:${x.file}(${x.sizeMB}MB)`).join('，') + (oversized.length > 5 ? ' 等' : ''))
     }
     return { ok: true, stats }
   } catch (e) {
