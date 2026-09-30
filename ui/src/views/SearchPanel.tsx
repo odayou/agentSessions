@@ -1,14 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { doSearch, fetchAccounts, fetchProjects, fetchAgents } from '../api'
+import { doSearch } from '../api'
 import { fmtTime, highlight } from '../lib'
 import type { SearchHit } from '../types'
+
+// 搜索态子组件（Gmail 式双态主页）：由 TimelineView 宿主在搜索框有关键词时挂载。
+// 保留完整搜索状态机：自动渐进（浅层结果不足才深入）+ 手动继续深搜 + 时间区间 + 命中层级徽标。
+// 过滤条件（agent/project/account）与时间预设由宿主持有，经 props 下发；本组件只管搜索与结果渲染。
 
 // 命中位置的自然语言呈现（内部按层级 1..4 区分，界面上不暴露层级概念）
 const HIT_WHERE: Record<number, string> = { 1: '标题', 2: '主题', 3: '正文', 4: '思考' }
 
-// 时间预设（readme：日期过滤是基础需求）：自定义区间按"日起点 00:00 ~ 日终点 23:59"取整
-type TimePreset = 'all' | 'today' | 'week' | 'month' | 'custom'
-const TIME_PRESETS: { v: TimePreset; label: string }[] = [
+// 时间预设：自定义区间按"日起点 00:00 ~ 日终点 23:59"取整
+export type TimePreset = 'all' | 'today' | 'week' | 'month' | 'custom'
+export const TIME_PRESETS: { v: TimePreset; label: string }[] = [
   { v: 'all', label: '全部时间' },
   { v: 'today', label: '今天' },
   { v: 'week', label: '本周' },
@@ -16,7 +20,7 @@ const TIME_PRESETS: { v: TimePreset; label: string }[] = [
   { v: 'custom', label: '自定义' },
 ]
 
-function rangeOf(p: TimePreset, fromD: string, toD: string): { from?: number; to?: number } {
+export function rangeOf(p: TimePreset, fromD: string, toD: string): { from?: number; to?: number } {
   const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
   if (p === 'today') return { from: dayStart(new Date()) }
   if (p === 'week') {
@@ -33,17 +37,18 @@ function rangeOf(p: TimePreset, fromD: string, toD: string): { from?: number; to
   return {}
 }
 
-export default function SearchView({ onOpenSession, hotkeyLabel }: { onOpenSession: (id: string, loc?: { seq?: number | null; q?: string }) => void; hotkeyLabel?: string }) {
-  const [q, setQ] = useState('')
-  const [accounts, setAccounts] = useState<{ id: string; displayName: string | null; rawName: string }[]>([])
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
-  const [agents, setAgents] = useState<{ agent_id: string; session_count: number }[]>([])
-  const [account, setAccount] = useState('')
-  const [project, setProject] = useState('')
-  const [agent, setAgent] = useState('')
-  const [time, setTime] = useState<TimePreset>('all')
-  const [fromD, setFromD] = useState('')
-  const [toD, setToD] = useState('')
+interface Props {
+  q: string
+  account: string
+  project: string
+  agent: string
+  time: TimePreset
+  fromD: string
+  toD: string
+  onOpenSession: (id: string, loc?: { seq?: number | null; q?: string }) => void
+}
+
+export default function SearchPanel({ q, account, project, agent, time, fromD, toD, onOpenSession }: Props) {
   const [results, setResults] = useState<SearchHit[]>([])
   const [total, setTotal] = useState(0)
   // 搜索范围（让用户知道"搜完了没有"）：实际搜到的深度 2=标题+主题 / 3=+正文 / 4=+思考
@@ -51,12 +56,6 @@ export default function SearchView({ onOpenSession, hotkeyLabel }: { onOpenSessi
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const timer = useRef<ReturnType<typeof setTimeout>>()
-
-  useEffect(() => {
-    fetchAccounts().then((a) => setAccounts(a)).catch(() => {})
-    fetchProjects().then((p) => setProjects(p)).catch(() => {})
-    fetchAgents().then((a) => setAgents(a)).catch(() => {})
-  }, [])
 
   // full=true 时全量搜索（标题/主题/正文/思考一次搜全）；否则自动渐进——浅层结果不足才深入
   const run = useCallback((q2: string, acc: string, proj: string, ag: string, rng: { from?: number; to?: number }, full = false) => {
@@ -72,7 +71,7 @@ export default function SearchView({ onOpenSession, hotkeyLabel }: { onOpenSessi
       .finally(() => setLoading(false))
   }, [])
 
-  // 自动搜索（防抖）：输入/过滤变化时回到自动渐进
+  // 自动搜索（防抖由宿主的 trigger 依赖驱动）：输入/过滤变化时回到自动渐进
   const trigger = useCallback(() => {
     if (!q.trim()) { setResults([]); setTotal(0); setSearchedDepth(0); return }
     run(q, account, project, agent, rangeOf(time, fromD, toD))
@@ -90,40 +89,10 @@ export default function SearchView({ onOpenSession, hotkeyLabel }: { onOpenSessi
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div className="search-bar">
-        <input
-          id="search-input"
-          className="search-input"
-          value={q}
-          placeholder={`搜索标题、主题、对话内容、思考过程…（按 ${hotkeyLabel || '/'} 随时回到这里）`}
-          onChange={(e) => setQ(e.target.value)}
-          autoFocus
-        />
-      </div>
+      {err && <div className="error">{err}</div>}
 
+      {/* 搜索状态行：让"搜到哪一层"可见，并提供手动继续深搜入口 */}
       <div className="filter-row">
-        <select className="select" value={account} onChange={(e) => setAccount(e.target.value)}>
-          <option value="">所有账号</option>
-          {accounts.map((a) => <option key={a.id} value={a.id}>{a.displayName || a.rawName}</option>)}
-        </select>
-        <select className="select" value={project} onChange={(e) => setProject(e.target.value)}>
-          <option value="">所有项目</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-        </select>
-        <select className="select" value={agent} onChange={(e) => setAgent(e.target.value)}>
-          <option value="">所有 Agent</option>
-          {agents.map((a) => <option key={a.agent_id} value={a.agent_id}>{a.agent_id}（{a.session_count}）</option>)}
-        </select>
-        <select className="select" value={time} onChange={(e) => setTime(e.target.value as TimePreset)} title="按会话更新时间过滤">
-          {TIME_PRESETS.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
-        </select>
-        {time === 'custom' && (
-          <>
-            <input className="select" type="date" value={fromD} onChange={(e) => setFromD(e.target.value)} title="起始日（含当天 00:00）" />
-            <span className="hint">至</span>
-            <input className="select" type="date" value={toD} onChange={(e) => setToD(e.target.value)} title="结束日（含当天 23:59）" />
-          </>
-        )}
         <span className="spacer" style={{ flex: 1 }} />
         {loading && <span className="status">搜索中…</span>}
         {!loading && q.trim() && searchedDepth >= 4 && (
@@ -143,10 +112,7 @@ export default function SearchView({ onOpenSession, hotkeyLabel }: { onOpenSessi
         )}
       </div>
 
-      {err && <div className="error">{err}</div>}
-
-      <div className="search-results" style={{ overflowY: 'auto', flex: 1 }}>
-        {!q.trim() && <div className="empty">输入关键词开始搜索。<br />先在标题与主题里快速查找，结果不多时自动深入对话正文与思考过程。</div>}
+      <div className="search-results" style={{ overflowY: 'auto', flex: 1, padding: '10px 20px 20px' }}>
         {q.trim() && total === 0 && !loading && (
           <div className="empty">
             {searchedDepth >= 4

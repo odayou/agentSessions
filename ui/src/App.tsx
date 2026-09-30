@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { doScan, ping, fetchStats, fetchConfig } from './api'
 import ProjectsView from './views/ProjectsView'
-import SearchView from './views/SearchView'
 import SessionView from './views/SessionView'
 import StatsView from './views/StatsView'
 import SettingsView from './views/SettingsView'
@@ -11,18 +10,21 @@ import { eventToHotkey, formatHotkey, hasModifier } from './hotkey'
 import { IS_TAURI } from './lib'
 import type { Locate, Stats } from './types'
 
-// —— hash 路由：#/sessions(默认·时间线) | #/search | #/projects | #/stats | #/settings | #/session/<id>[?seq=&q=] ——
+// —— hash 路由：#/sessions(默认·双态主页) | #/projects | #/stats | #/settings | #/session/<id>[?seq=&q=] ——
+// 会话主页为 Gmail 式双态：空关键词=时间线分组，有关键词=搜索结果态（搜索框常驻，不再有独立搜索页）。
 // 会话详情在右栏打开，浏览器前进/后退自然闭环。
 // seq/q 为搜索命中定位参数（readme §D：点击跳转到会话详情的命中轮次）。
-type ListView = 'sessions' | 'search' | 'projects' | 'stats' | 'settings'
+type ListView = 'sessions' | 'projects' | 'stats' | 'settings'
 
 interface Route {
   list: ListView
   sessionId: string | null
   locate: Locate
+  // '#/search' 旧链接兼容：重定向到主页并聚焦搜索框（瞬态，仅当次导航生效）
+  focusSearch?: boolean
 }
 
-const LIST_VIEWS: ListView[] = ['sessions', 'search', 'projects', 'stats', 'settings']
+const LIST_VIEWS: ListView[] = ['sessions', 'projects', 'stats', 'settings']
 const EMPTY_LOCATE: Locate = { seq: null, q: '' }
 
 function parseHash(): Route {
@@ -41,9 +43,10 @@ function parseHash(): Route {
       },
     }
   }
-  const list = LIST_VIEWS.includes(seg[0] as ListView) ? (seg[0] as ListView) : 'sessions'
+  const focusSearch = seg[0] === 'search'
+  const list = focusSearch ? 'sessions' : (LIST_VIEWS.includes(seg[0] as ListView) ? seg[0] as ListView : 'sessions')
   lastList = list
-  return { list, sessionId: null, locate: EMPTY_LOCATE }
+  return { list, sessionId: null, locate: EMPTY_LOCATE, focusSearch }
 }
 
 // 上一个列表视图（供 session 路由返回时恢复；模块级即可，不参与渲染）
@@ -135,7 +138,7 @@ export default function App() {
     location.hash = `#/${lastList}`
   }, [])
 
-  // 快捷键（M4）：Esc 关闭详情返回列表；可自定义热键（默认 /）跳到搜索并聚焦输入框
+  // 快捷键（M4）：Esc 关闭详情返回列表；可自定义热键（默认 /）聚焦主页常驻搜索框
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.isComposing) return // 输入法组词过程中的按键不处理
@@ -149,10 +152,8 @@ export default function App() {
       }
       e.preventDefault()
       const focusSearch = () => (document.getElementById('search-input') as HTMLInputElement | null)?.focus()
-      // 已在搜索页：hash 不变不会触发重渲染，同步聚焦即可
-      if (location.hash === '#/search') { focusSearch(); return }
-      location.hash = '#/search'
-      // SearchView 挂载时序不定（首次切换视图），多级兜底聚焦
+      // 双态主页搜索框常驻：详情中先回主页，再多级兜底聚焦（挂载时序不定）
+      if (route.sessionId) closeSession()
       requestAnimationFrame(focusSearch)
       setTimeout(focusSearch, 60)
       setTimeout(focusSearch, 250)
@@ -201,9 +202,8 @@ export default function App() {
       <header className="topbar">
         <h1>AgentSessions</h1>
         <nav className="tabs">
-          <button className={`tab ${route.list === 'sessions' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('sessions')}>会话</button>
-          <button className={`tab ${route.list === 'search' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('search')}>搜索 <span className="kbd">{formatHotkey(searchHotkey)}</span></button>
-          <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目 / 账号</button>
+          <button className={`tab ${route.list === 'sessions' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('sessions')}>会话<span className="kbd">{formatHotkey(searchHotkey)}</span></button>
+          <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目</button>
           <button className={`tab ${route.list === 'stats' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('stats')}>统计</button>
           <button className={`tab ${route.list === 'settings' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('settings')}>设置</button>
         </nav>
@@ -214,9 +214,8 @@ export default function App() {
       <div className="body">
         {/* 左栏：列表视图（详情打开时可收起） */}
         <div className={`main-col ${route.sessionId ? 'has-detail' : ''} ${route.sessionId && leftCollapsed ? 'collapsed' : ''}`}>
-          {route.list === 'sessions' && <TimelineView key={`tl-${refreshKey}`} onOpenSession={openSession} />}
+          {route.list === 'sessions' && <TimelineView key={`tl-${refreshKey}`} onOpenSession={openSession} hotkeyLabel={formatHotkey(searchHotkey)} autoFocusSearch={route.focusSearch} />}
           {route.list === 'projects' && <ProjectsView key={`p-${refreshKey}`} onOpenSession={openSession} />}
-          {route.list === 'search' && <SearchView key={`s-${refreshKey}`} onOpenSession={openSession} hotkeyLabel={formatHotkey(searchHotkey)} />}
           {route.list === 'stats' && <StatsView key={`st-${refreshKey}`} />}
           {route.list === 'settings' && <SettingsView key={`se-${refreshKey}`} onSaved={() => setRefreshKey((k) => k + 1)} />}
         </div>
