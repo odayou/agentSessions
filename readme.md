@@ -15,7 +15,7 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 ### 时间线：先看到"活"
 
 - 所有工具的会话汇成一条时间线，按 今天 / 昨天 / 7 天内 / 本月 / 更早 自动分组
-- 卡片上一眼看到：标题、★ 收藏、工具、账号、项目、话题、轮次数、时间
+- 卡片上一眼看到：标题、工具、账号、项目、话题、轮次数、时间
 - 支持按 Agent / 项目 / 账号 快速过滤
 
 ### 搜索：从浅到深，渐进披露
@@ -32,7 +32,6 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 - 思考 / 工具 / 文件内容可按类型开关，只看你想看的
 - 代码块语法高亮（零依赖实现，防注入）
 - 会话内搜索 + 命中定位
-- ★ 收藏常用会话
 
 ### 导出与交接
 

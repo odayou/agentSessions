@@ -312,13 +312,13 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
     <div style={{ padding: 20, maxWidth: 880, margin: '0 auto', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <button className="scan-btn" onClick={onBack}>← 返回</button>
-        <button
+        {/* <button
           className={`scan-btn star-btn ${s.starred ? 'starred' : ''}`}
           onClick={onStar}
           title={s.starred ? '取消星标' : '星标收藏，便于快速找回'}
         >
           {s.starred ? '★ 已收藏' : '☆ 收藏'}
-        </button>
+        </button> */}
         <span className="spacer" style={{ flex: 1 }} />
         <button
           className="scan-btn"
