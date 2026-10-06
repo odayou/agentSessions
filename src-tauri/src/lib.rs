@@ -12,6 +12,24 @@ const BRIDGE_PORT: &str = "18778";
 // 保存子进程句柄，便于退出时回收
 struct BridgeState(Mutex<Option<Child>>);
 
+// Tauri 的 resource_dir 在 Windows 返回 \\?\ 前缀的 verbatim 路径，
+// node 无法将其解析为模块入口（报 EISDIR 'D:'），需转回常规路径
+fn simplify_path(p: PathBuf) -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let s = p.as_os_str().to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest.to_string());
+        }
+        p
+    }
+    #[cfg(not(target_os = "windows"))]
+    p
+}
+
 // 后端三元组 (node 可执行, server.js, 工作目录)：
 // dev 走仓库根 + 系统 node；prod 走打包进资源目录的自包含 backend/（自带 node.exe，
 // 由根目录 scripts/pack-backend.js 生成，见 tauri.conf.json 的 resources/beforeBuildCommand）
@@ -28,11 +46,12 @@ fn resolve_backend(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf, PathBuf)
     }
     #[cfg(not(debug_assertions))]
     {
-        let backend = app
-            .path()
-            .resource_dir()
-            .map_err(|e| format!("资源目录定位失败：{e}"))?
-            .join("backend");
+        let backend = simplify_path(
+            app.path()
+                .resource_dir()
+                .map_err(|e| format!("资源目录定位失败：{e}"))?
+                .join("backend"),
+        );
         Ok((backend.join("node.exe"), backend.join("server.js"), backend))
     }
 }
@@ -66,11 +85,16 @@ fn spawn_bridge(app: &tauri::AppHandle) -> Result<Child, String> {
     #[cfg(not(target_os = "windows"))]
     let mut cmd = Command::new(&node_str);
 
+    // 诊断：桥的 stdout/stderr 落盘（release 无控制台，否则桥崩溃无从排查）
+    let out = std::fs::File::create(std::env::temp_dir().join("agentsessions-bridge.log"))
+        .map_err(|e| format!("创建桥日志失败：{e}"))?;
+    let err = out.try_clone().map_err(|e| format!("桥日志句柄复制失败：{e}"))?;
+
     cmd.arg(&script_str)
         .current_dir(&cwd)
         .env("AGENTSESSIONS_PORT", BRIDGE_PORT)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(out))
+        .stderr(Stdio::from(err))
         .spawn()
         .map_err(|e| format!("启动 Node 桥失败：{e}"))
 }
@@ -109,7 +133,12 @@ pub fn run() {
                 }
                 Err(e) => {
                     // 桥启动失败不阻塞 UI：前端会显示离线提示
+                    // release 无控制台，错误同步落盘到 %TEMP%\agentsessions-spawn.err 便于排查
                     app.manage(BridgeState(Mutex::new(None)));
+                    let _ = std::fs::write(
+                        std::env::temp_dir().join("agentsessions-spawn.err"),
+                        format!("{e}\n"),
+                    );
                     eprintln!("[agentsessions] {e}（前端将提示后端离线）");
                 }
             }
