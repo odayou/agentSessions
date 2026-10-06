@@ -23,6 +23,7 @@ fn resolve_backend(app: &tauri::AppHandle) -> Result<(PathBuf, PathBuf, PathBuf)
             .parent()
             .map(|p| p.to_path_buf())
             .unwrap_or_default();
+        let _ = app; // dev 分支不消费 app_handle，避免 debug 构建告警
         Ok((PathBuf::from("node"), repo.join("server.js"), repo))
     }
     #[cfg(not(debug_assertions))]
@@ -50,7 +51,8 @@ fn spawn_bridge(app: &tauri::AppHandle) -> Result<Child, String> {
     if !script.exists() {
         return Err(format!("未找到桥脚本：{}", script.display()));
     }
-    if !node.exists() {
+    if node.is_absolute() && !node.exists() {
+        // 裸名（如 "node"）不做 exists 检查：它靠 PATH 查找，相对 cwd 判断必然误判
         return Err(format!("未找到 node 可执行文件：{}", node.display()));
     }
 
