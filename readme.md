@@ -235,7 +235,7 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 
 ## 打包
 
-桌面安装包基于 **Tauri 2**（Windows 目标：NSIS / MSI，配置见 [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json)）。
+桌面安装包基于 **Tauri 2**（配置见 [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json)）：本地可打 Windows 包（NSIS / MSI），macOS / Linux 包由 CI 自动产出（见下文 CI 自动打包）。
 
 **环境要求**：
 
@@ -249,7 +249,7 @@ cd ui && npm run tauri build   # 产出安装包（src-tauri/target/release/bund
 cd ui && npm run tauri dev     # 桌面壳开发模式
 ```
 
-> 注意：`@tauri-apps/cli` 安装在 `ui/` 的 devDependencies 中，必须在 `ui/` 目录下通过 `npm run tauri` 调用（脚本会自动回到项目根目录执行）；在根目录直接 `npx tauri` 会报 `could not determine executable to run`。
+> 注意：`@tauri-apps/cli` 同时装在根目录与 `ui/` 的 devDependencies 中（CI 从根目录调用），`cd ui && npm run tauri`（脚本会自动回到项目根目录执行）与根目录 `npx tauri` 均可。
 
 **国内网络必备**：首次打包时 Tauri 需从 GitHub releases 下载 NSIS / WiX 工具链，直连通常超时（报 `timeout: global`）。设置 GitHub 镜像后重试即可：
 
@@ -264,6 +264,21 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 实测可用镜像（任选其一）：`gh-proxy.com` / `ghproxy.net` / `ghfast.top`。工具链会缓存到 `%LOCALAPPDATA%\tauri\`，首次下载成功后后续构建不再需要镜像。若走本地代理，也可改设 `HTTPS_PROXY`。
 
 **自包含后端**：桌面安装包内置完整后端，无需目标机器安装 Node——`beforeBuildCommand` 自动执行 [scripts/pack-backend.js](scripts/pack-backend.js)，把 `node.exe` + `server.js` + `src/` + `adapters/` + 运行时依赖（`better-sqlite3` 等，已裁剪 sqlite 源码）组装为 `src-tauri/backend/`（约 70MB，已 gitignore），由 `tauri.conf.json` 的 `resources` 打进安装包。桌面版启动时自动拉起该桥进程（`127.0.0.1:18778`），期间界面显示启动过渡屏（就绪即自动进入主界面），退出时自动回收进程；自带 node 也保证了 `better-sqlite3` 原生模块与运行时 ABI 严格一致。dev 模式（`tauri dev`）同样会自动拉起仓库根目录的 `server.js`。
+
+### CI 自动打包（GitHub Actions）
+
+推送 `v*` 标签（或在 Actions 页手动触发并填版本号）即自动构建三平台安装包并发布 Release，流程见 [.github/workflows/build.yml](.github/workflows/build.yml)：
+
+| 平台              | 安装包产物   |
+| ----------------- | ------------ |
+| Windows x64       | NSIS + MSI   |
+| macOS Apple Silicon | App + DMG  |
+| Linux x64         | DEB + AppImage |
+
+- **产物命名随 tag**：CI 用 tag 版本覆盖 `tauri.conf.json` 的静态 `version`（如推 `v0.2.0` 产出 `AgentSessions_0.2.0_x64-setup.exe`）
+- **发布流程**：构建期间产物挂在 draft release（也可在 Actions 页的 Artifacts 直接下载），三平台全部成功后自动转正式发布；任一平台失败则保持 draft 便于排查
+- **macOS 未签名**：首次打开需右键 → 打开绕过 Gatekeeper；要正式分发需自行配置 Apple Developer ID 签名与公证
+- Linux 包用 ubuntu-22.04 构建，兼容 glibc ≥ 2.35 的发行版
 
 > 日常开发无需打包：`npm run bridge` + `npm run dev:ui` 即可（或 `cd ui && npm run tauri dev`，桌面壳开发模式会自动拉起后端）。
 
