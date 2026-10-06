@@ -206,6 +206,7 @@ export default function App() {
           <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目</button>
           <button className={`tab ${route.list === 'stats' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('stats')}>统计</button>
           <button className={`tab ${route.list === 'settings' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('settings')}>设置</button>
+          <button className="tab" onClick={() => window.open('https://github.com/odayou/agentSessions/releases/latest')}>检查更新</button>
         </nav>
         <span className="spacer" />
         <span className="status">{scanMsg}</span>

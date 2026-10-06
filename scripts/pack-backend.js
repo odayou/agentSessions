@@ -55,6 +55,8 @@ function main() {
   // 3. Node 运行时（与上面原生模块的编译 ABI 一致）
   const nodeExe = process.execPath
   fs.copyFileSync(nodeExe, path.join(OUT, 'node.exe'))
+  // mac/linux 产物需保留可执行位（copyFileSync 不保证），否则安装包内的 node 无法启动
+  if (process.platform !== 'win32') fs.chmodSync(path.join(OUT, 'node.exe'), 0o755)
 
   // 4. 自检：原生模块必须在
   const native = path.join(outNm, 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
