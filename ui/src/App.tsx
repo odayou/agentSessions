@@ -7,7 +7,7 @@ import StatsView from './views/StatsView'
 import SettingsView from './views/SettingsView'
 import TimelineView from './views/TimelineView'
 import { eventToHotkey, formatHotkey, hasModifier } from './hotkey'
-import { IS_TAURI } from './lib'
+import { IS_TAURI, openExternal } from './lib'
 import type { Locate, Stats } from './types'
 
 // —— hash 路由：#/sessions(默认·双态主页) | #/projects | #/stats | #/settings | #/session/<id>[?seq=&q=] ——
@@ -206,7 +206,7 @@ export default function App() {
           <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目</button>
           <button className={`tab ${route.list === 'stats' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('stats')}>统计</button>
           <button className={`tab ${route.list === 'settings' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('settings')}>设置</button>
-          <button className="tab" onClick={() => window.open('https://github.com/odayou/agentSessions/releases/latest')}>检查更新</button>
+          <button className="tab" onClick={() => openExternal('https://github.com/odayou/agentSessions/releases/latest')}>检查更新</button>
         </nav>
         <span className="spacer" />
         <span className="status">{scanMsg}</span>

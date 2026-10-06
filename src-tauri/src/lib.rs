@@ -96,6 +96,7 @@ fn toggle_devtools(window: tauri::WebviewWindow) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init()) // 系统目录选择框（设置页「浏览…」）
+        .plugin(tauri_plugin_opener::init()) // 系统浏览器打开外链（检查更新 / markdown 链接）
         .invoke_handler(tauri::generate_handler![toggle_devtools])
         .setup(|app| {
             let child = spawn_bridge(app.handle());

@@ -1,8 +1,29 @@
 // 前端共享工具：时间格式化 + 关键词高亮（列表卡片与详情视图共用）。
 import React from 'react'
+import { openUrl } from '@tauri-apps/plugin-opener'
 
 // 是否运行在 Tauri 桌面壳内（浏览器 dev 模式为 false，沿用浏览器自带 DevTools）
 export const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+// 打开外部链接：桌面壳内走 opener 插件（webview 里 window.open 与 target="_blank" 被拦截），
+// 浏览器 dev 模式回落原生 window.open
+export function openExternal(url: string): void {
+  if (IS_TAURI) openUrl(url).catch((e) => console.error('打开外链失败：', e))
+  else window.open(url)
+}
+
+// 全局兜底：markdown 渲染出的 <a target="_blank"> 在桌面壳内点了没反应，
+// 捕获点击统一改走 openExternal（浏览器 dev 模式行为不变，仅把默认新标签换成 window.open）
+export function installExternalLinkHandler(): void {
+  document.addEventListener('click', (e) => {
+    const a = (e.target as Element | null)?.closest?.('a[target="_blank"]') as HTMLAnchorElement | null
+    if (!a) return
+    const href = a.getAttribute('href')
+    if (!href) return
+    e.preventDefault()
+    openExternal(href)
+  })
+}
 
 // 短格式（不含年）：列表卡片时间徽标；空值显示 fallback
 export function fmtTime(t: number | null, fallback = '—'): string {
