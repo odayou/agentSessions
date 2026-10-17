@@ -246,6 +246,11 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 }
 .statusbar-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .statusbar-version { flex: none; }
+/* 更新提示（与顶栏 tab-update 同色系）：有新版时高亮为可点击按钮 */
+button.statusbar-update {
+  border: none; background: #fff8c5; border-radius: 8px; padding: 0 8px; cursor: pointer;
+  color: #7d4e00; font-weight: 600; font-size: 12px; font-family: inherit;
+}
 
 /* 星标按钮（会话详情） */
 .star-btn.starred { color: #b58900; border-color: #e0c252; }

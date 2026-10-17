@@ -65,9 +65,11 @@ export default function App() {
   // 启动门控：桌面版后端由主进程拉起，就绪前显示过渡屏而非空状态界面
   const [booting, setBooting] = useState(true)
   const [bootSlow, setBootSlow] = useState(false)
-  // 版本与更新：顶栏显示当前版本；有新版时按钮亮起，点击直达下载页
+  // 版本与更新：底部状态栏常驻当前版本号；有新版时状态栏高亮提示，手动检查入口在设置页关于面板
   const [appVersion, setAppVersion] = useState('')
   const [newVersion, setNewVersion] = useState<string | null>(null)
+  // 手动检查更新的结果文案（显示在设置页关于面板）
+  const [checkMsg, setCheckMsg] = useState('')
 
   // 启动时静默检查一次更新（GitHub releases；离线/限流静默跳过）
   useEffect(() => {
@@ -85,7 +87,7 @@ export default function App() {
     if (newVersion) { openExternal(`${REPO_URL}/releases/latest`); return }
     const latest = await fetchLatestVersion()
     if (latest && isNewerVersion(appVersion, latest)) setNewVersion(latest)
-    else setScanMsg(`已是最新版本 v${appVersion}`)
+    else setCheckMsg(`已是最新版本 v${appVersion}`)
   }, [newVersion, appVersion])
 
   const checkOnline = useCallback(async () => {
@@ -228,13 +230,6 @@ export default function App() {
           <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目</button>
           <button className={`tab ${route.list === 'stats' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('stats')}>统计</button>
           <button className={`tab ${route.list === 'settings' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('settings')}>设置</button>
-          <button
-            className={`tab ${newVersion ? 'tab-update' : ''}`}
-            title={newVersion ? `有新版本 v${newVersion}，点击前往下载` : `当前 v${appVersion}，点击检查更新`}
-            onClick={onCheckUpdate}
-          >
-            {newVersion ? `新版本 v${newVersion} →` : appVersion ? `v${appVersion}` : '检查更新…'}
-          </button>
         </nav>
         <span className="spacer" />
         <span className="status">{scanMsg}</span>
@@ -246,7 +241,7 @@ export default function App() {
           {route.list === 'sessions' && <TimelineView key={`tl-${refreshKey}`} onOpenSession={openSession} hotkeyLabel={formatHotkey(searchHotkey)} autoFocusSearch={route.focusSearch} />}
           {route.list === 'projects' && <ProjectsView key={`p-${refreshKey}`} onOpenSession={openSession} />}
           {route.list === 'stats' && <StatsView key={`st-${refreshKey}`} />}
-          {route.list === 'settings' && <SettingsView key={`se-${refreshKey}`} onSaved={() => setRefreshKey((k) => k + 1)} />}
+          {route.list === 'settings' && <SettingsView key={`se-${refreshKey}`} onSaved={() => setRefreshKey((k) => k + 1)} onCheckUpdate={onCheckUpdate} checkMsg={checkMsg} />}
         </div>
         {/* 右栏：会话详情 */}
         {route.sessionId && (
@@ -264,17 +259,18 @@ export default function App() {
           </>
         )}
       </div>
-      <StatusBar refreshKey={refreshKey} />
+      <StatusBar refreshKey={refreshKey} appVersion={appVersion} newVersion={newVersion} onCheckUpdate={onCheckUpdate} />
     </div>
   )
 }
 
-// 底部状态栏（readme §6.1）：已索引量 + 最近扫描时间，让自动增量扫描"看得见"
-function StatusBar({ refreshKey }: { refreshKey: number }) {
+// 底部状态栏（readme §6.1）：已索引量 + 最近扫描时间，让自动增量扫描"看得见"；
+// 右侧常驻当前版本号，有新版时高亮为可点击的更新提示
+function StatusBar({ refreshKey, appVersion, newVersion, onCheckUpdate }: {
+  refreshKey: number; appVersion: string; newVersion: string | null; onCheckUpdate: () => void
+}) {
   const [info, setInfo] = useState<{ stats: Stats; lastScanAt: number } | null>(null)
-  const [version, setVersion] = useState('')
 
-  useEffect(() => { getAppVersion().then(setVersion).catch(() => {}) }, [])
   useEffect(() => {
     let alive = true
     const load = () => fetchStats(1).then((d) => { if (alive) setInfo(d) }).catch(() => {})
@@ -298,7 +294,13 @@ function StatusBar({ refreshKey }: { refreshKey: number }) {
           ? <>已索引 {info.stats.totalSessions.toLocaleString()} 会话 · {info.stats.totalProjects} 项目 · {info.stats.byAgent.length} 个 Agent · 最后扫描 {lastScan}</>
           : '…'}
       </span>
-      {version && <span className="statusbar-version">v{version}</span>}
+      {newVersion ? (
+        <button className="statusbar-version statusbar-update" title={`有新版本 v${newVersion}，点击前往下载`} onClick={onCheckUpdate}>
+          v{appVersion} → v{newVersion}
+        </button>
+      ) : appVersion ? (
+        <span className="statusbar-version">v{appVersion}</span>
+      ) : null}
     </footer>
   )
 }

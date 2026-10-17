@@ -22,7 +22,11 @@ const FALLBACK_AGENT_LIST: { id: string; label: string }[] = [
 
 // 设置视图（M4，规划 §三F）：排除规则（S8）/ 自动扫描间隔 / 账号映射 / Agent 路径 / 大文件保护。
 // 保存走 POST /api/config，服务端保存后自动重扫一次使排除立即生效。
-export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
+export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
+  onSaved?: () => void
+  onCheckUpdate?: () => void
+  checkMsg?: string
+}) {
   const [config, setConfig] = useState<AppConfig | null>(null)
   const [accounts, setAccounts] = useState<Account[]>([])
   const [excludesText, setExcludesText] = useState('')
@@ -366,11 +370,13 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
         <div className="stats-body">
           <div className="scan-setting" style={{ flexWrap: 'wrap', gap: 10 }}>
             <span>AgentSessions v{appVersion || '…'}</span>
+            <button className="scan-btn mini-btn" onClick={() => onCheckUpdate?.()}>检查更新</button>
             <button className="scan-btn mini-btn" onClick={() => openExternal(REPO_URL)}>代码仓库</button>
             <button className="scan-btn mini-btn" onClick={() => openExternal(ISSUES_URL)}>问题反馈</button>
+            {checkMsg && <span className="status">{checkMsg}</span>}
           </div>
           <div className="hint" style={{ marginTop: 8 }}>
-            启动时会自动检查新版本；有更新时顶栏版本号会亮起，点击直达下载页。
+            启动时会自动检查新版本；有更新时底部状态栏会高亮显示，点击直达下载页。
           </div>
         </div>
       </div>
