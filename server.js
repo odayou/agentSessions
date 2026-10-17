@@ -16,6 +16,13 @@ const q = require('./src/query')
 const PORT = Number(process.env.AGENTSESSIONS_PORT) || 18778
 const DB_PATH = process.env.AGENTSESSIONS_DB || defaultDbPath()
 
+// —— 父进程死亡守护 ——
+// 宿主（Tauri 壳）崩溃/被强杀/系统关机时走不到正常回收逻辑，node 会成为孤儿并锁死安装目录
+// （覆盖安装报 “Can't write backend\node.exe”，issue #1）。桌面版 spawn 时以管道接入 stdin，
+// 宿主一死管道写端即关闭 → 这里收到 close 自杀，孤儿免疫。手动 npm run bridge 时关掉终端即停服。
+process.stdin.resume()
+process.stdin.on('close', () => process.exit(0))
+
 // —— 自动增量扫描（M4，规划 §三F「自动更新索引」）：启动即扫一次 + 按配置间隔定时 ——
 // 间隔读 config.autoScanMinutes（分钟，0=关闭），每次 tick 重读配置，改配置即时生效（无需重启）。
 let lastAutoScanAt = 0

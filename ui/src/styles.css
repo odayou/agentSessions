@@ -34,6 +34,8 @@ body { margin: 0; background: var(--bg); color: var(--text); }
   border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--muted);
 }
 .tab.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; border-color: #b6d7ff; }
+/* 顶栏更新提示：有新版本时版本按钮亮起（GitHub 式 attention 黄） */
+.tab.tab-update { background: #fff8c5; border-color: #d4a72c; color: #7d4e00; font-weight: 600; }
 .spacer { flex: 1; }
 .scan-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--accent-bg); cursor: pointer; font-size: 13px; }
 .scan-btn:hover { background: var(--bg); }
@@ -239,10 +241,11 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 
 /* 底部状态栏（readme §6.1）：已索引量 + 最后扫描时间 */
 .statusbar {
-  flex: none; padding: 4px 16px; border-top: 1px solid var(--border);
+  flex: none; display: flex; justify-content: space-between; gap: 16px; padding: 4px 16px; border-top: 1px solid var(--border);
   font-size: 12px; color: var(--muted); background: var(--panel);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.statusbar-main { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.statusbar-version { flex: none; }
 
 /* 星标按钮（会话详情） */
 .star-btn.starred { color: #b58900; border-color: #e0c252; }

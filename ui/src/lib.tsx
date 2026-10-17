@@ -25,6 +25,44 @@ export function installExternalLinkHandler(): void {
   })
 }
 
+// —— 项目信息 / 更新检查 ——
+
+export const REPO_URL = 'https://github.com/odayou/agentSessions'
+export const ISSUES_URL = `${REPO_URL}/issues`
+const RELEASES_API = 'https://api.github.com/repos/odayou/agentSessions/releases/latest'
+
+// vite define 注入（见 ui/vite.config.ts）：根 package.json 的版本号（浏览器 dev 用）
+declare const __APP_VERSION__: string
+
+// 版本号：桌面壳读 tauri.conf 的 version；浏览器 dev 用构建时注入的根 package.json 版本
+export async function getAppVersion(): Promise<string> {
+  if (IS_TAURI) return import('@tauri-apps/api/app').then((m) => m.getVersion())
+  return __APP_VERSION__
+}
+
+// 查询 GitHub 最新 release 版本号（去 v 前缀）；离线/限流静默返回 null，不打扰用户
+export async function fetchLatestVersion(): Promise<string | null> {
+  try {
+    const res = await fetch(RELEASES_API, { headers: { Accept: 'application/vnd.github+json' } })
+    if (!res.ok) return null
+    const tag = (await res.json())?.tag_name
+    return tag ? String(tag).replace(/^v/i, '') : null
+  } catch {
+    return null
+  }
+}
+
+// 版本比较：latest 是否大于 current（忽略 v 前缀与预发布/构建后缀）
+export function isNewerVersion(current: string, latest: string): boolean {
+  const seg = (s: string) => s.replace(/^v/i, '').split(/[.\-+]/).map((x) => parseInt(x, 10) || 0)
+  const a = seg(latest)
+  const b = seg(current)
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0)
+  }
+  return false
+}
+
 // 短格式（不含年）：列表卡片时间徽标；空值显示 fallback
 export function fmtTime(t: number | null, fallback = '—'): string {
   if (!t) return fallback

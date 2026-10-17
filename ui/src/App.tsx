@@ -7,7 +7,7 @@ import StatsView from './views/StatsView'
 import SettingsView from './views/SettingsView'
 import TimelineView from './views/TimelineView'
 import { eventToHotkey, formatHotkey, hasModifier } from './hotkey'
-import { IS_TAURI, openExternal } from './lib'
+import { IS_TAURI, openExternal, getAppVersion, fetchLatestVersion, isNewerVersion, REPO_URL } from './lib'
 import type { Locate, Stats } from './types'
 
 // —— hash 路由：#/sessions(默认·双态主页) | #/projects | #/stats | #/settings | #/session/<id>[?seq=&q=] ——
@@ -65,6 +65,28 @@ export default function App() {
   // 启动门控：桌面版后端由主进程拉起，就绪前显示过渡屏而非空状态界面
   const [booting, setBooting] = useState(true)
   const [bootSlow, setBootSlow] = useState(false)
+  // 版本与更新：顶栏显示当前版本；有新版时按钮亮起，点击直达下载页
+  const [appVersion, setAppVersion] = useState('')
+  const [newVersion, setNewVersion] = useState<string | null>(null)
+
+  // 启动时静默检查一次更新（GitHub releases；离线/限流静默跳过）
+  useEffect(() => {
+    let alive = true
+    getAppVersion().then(async (cur) => {
+      if (!alive) return
+      setAppVersion(cur)
+      const latest = await fetchLatestVersion()
+      if (alive && latest && isNewerVersion(cur, latest)) setNewVersion(latest)
+    })
+    return () => { alive = false }
+  }, [])
+
+  const onCheckUpdate = useCallback(async () => {
+    if (newVersion) { openExternal(`${REPO_URL}/releases/latest`); return }
+    const latest = await fetchLatestVersion()
+    if (latest && isNewerVersion(appVersion, latest)) setNewVersion(latest)
+    else setScanMsg(`已是最新版本 v${appVersion}`)
+  }, [newVersion, appVersion])
 
   const checkOnline = useCallback(async () => {
     try {
@@ -206,7 +228,13 @@ export default function App() {
           <button className={`tab ${route.list === 'projects' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('projects')}>项目</button>
           <button className={`tab ${route.list === 'stats' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('stats')}>统计</button>
           <button className={`tab ${route.list === 'settings' && !route.sessionId ? 'active' : ''}`} onClick={() => goList('settings')}>设置</button>
-          <button className="tab" onClick={() => openExternal('https://github.com/odayou/agentSessions/releases/latest')}>检查更新</button>
+          <button
+            className={`tab ${newVersion ? 'tab-update' : ''}`}
+            title={newVersion ? `有新版本 v${newVersion}，点击前往下载` : `当前 v${appVersion}，点击检查更新`}
+            onClick={onCheckUpdate}
+          >
+            {newVersion ? `新版本 v${newVersion} →` : appVersion ? `v${appVersion}` : '检查更新…'}
+          </button>
         </nav>
         <span className="spacer" />
         <span className="status">{scanMsg}</span>
@@ -244,7 +272,9 @@ export default function App() {
 // 底部状态栏（readme §6.1）：已索引量 + 最近扫描时间，让自动增量扫描"看得见"
 function StatusBar({ refreshKey }: { refreshKey: number }) {
   const [info, setInfo] = useState<{ stats: Stats; lastScanAt: number } | null>(null)
+  const [version, setVersion] = useState('')
 
+  useEffect(() => { getAppVersion().then(setVersion).catch(() => {}) }, [])
   useEffect(() => {
     let alive = true
     const load = () => fetchStats(1).then((d) => { if (alive) setInfo(d) }).catch(() => {})
@@ -263,9 +293,12 @@ function StatusBar({ refreshKey }: { refreshKey: number }) {
 
   return (
     <footer className="statusbar">
-      {info
-        ? <>已索引 {info.stats.totalSessions.toLocaleString()} 会话 · {info.stats.totalProjects} 项目 · {info.stats.byAgent.length} 个 Agent · 最后扫描 {lastScan}</>
-        : '…'}
+      <span className="statusbar-main">
+        {info
+          ? <>已索引 {info.stats.totalSessions.toLocaleString()} 会话 · {info.stats.totalProjects} 项目 · {info.stats.byAgent.length} 个 Agent · 最后扫描 {lastScan}</>
+          : '…'}
+      </span>
+      {version && <span className="statusbar-version">v{version}</span>}
     </footer>
   )
 }

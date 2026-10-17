@@ -87,7 +87,20 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 
 ## 安装与运行（从源码）
 
-**环境要求**：Node.js ≥ 18（Windows / macOS / Linux）
+**环境要求**：Node.js **18 或 20**（Windows / macOS / Linux）。唯一原生依赖 better-sqlite3 v9.x 的预编译二进制只覆盖到 Node 20（ABI 115），用 Node 22/24 会报 `NODE_MODULE_VERSION` 错配——届时需升级 better-sqlite3 到 v11+ 或 `npm rebuild better-sqlite3` 本地源码编译（需 VS 构建工具）。
+
+**常见问题（切换 Node 版本后启动报错 / 扫描失败）**：本机升降级 Node 后，原生模块 ABI 与当前 Node 不匹配，两种典型报错：
+
+- `NODE_MODULE_VERSION xxx was compiled against a different Node.js version`：`node_modules` 是在其他 Node ABI 下安装的
+- `Could not locate the bindings file`：曾在不匹配的 Node 版本下执行过 `npm rebuild`，旧二进制被删除且源码编译未成功，包处于残缺状态
+
+修复相同——切回要求的版本（18 或 20），重装该包恢复与当前 ABI 匹配的预编译二进制：
+
+```bash
+npm install better-sqlite3@^9.6.0
+```
+
+注意：不要在不匹配的 Node 版本下 `npm rebuild better-sqlite3`，会删掉旧二进制后编译失败，反而造成残缺（见上）。打包同理：打包脚本会把**当前** `node.exe` 与按其 ABI 编译的原生模块一起打进载荷，两者必须一致（CI 已固定 Node 20）。
 
 ```bash
 # 1. 安装依赖（根目录核心 + 前端）
@@ -241,6 +254,7 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 
 - Rust（MSVC 工具链 `x86_64-pc-windows-msvc`——GNU 工具链链接 WebView2 会报 `export ordinal too large`，项目已在 `rust-toolchain.toml` 固定）
 - Windows 需要 WebView2 Runtime（Win11 自带）
+- 本地打包的 Node 版本须与安装依赖时一致：打包脚本会把当前 `node.exe` 与按其 ABI 编译的原生模块一起打进载荷，两者错配会导致安装包后端起不来（CI 已固定 Node 20，无此问题）
 
 ```bash
 cd ui && npm install && cd ..

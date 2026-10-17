@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect } from '../api'
 import { eventToHotkey, formatHotkey } from '../hotkey'
-import { IS_TAURI } from '../lib'
+import { IS_TAURI, openExternal, REPO_URL, ISSUES_URL, getAppVersion } from '../lib'
 import type { Account, AppConfig, DetectedAgent } from '../types'
 
 const KINDS = ['other', 'work', 'personal']
@@ -46,6 +46,10 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState('')
+  // 关于面板：当前应用版本
+  const [appVersion, setAppVersion] = useState('')
+
+  useEffect(() => { getAppVersion().then(setAppVersion).catch(() => {}) }, [])
 
   useEffect(() => {
     fetchConfig().then((c) => {
@@ -356,6 +360,20 @@ export default function SettingsView({ onSaved }: { onSaved?: () => void }) {
           </div>
         </div>
       )}
+
+      <div className="panel">
+        <h3>关于</h3>
+        <div className="stats-body">
+          <div className="scan-setting" style={{ flexWrap: 'wrap', gap: 10 }}>
+            <span>AgentSessions v{appVersion || '…'}</span>
+            <button className="scan-btn mini-btn" onClick={() => openExternal(REPO_URL)}>代码仓库</button>
+            <button className="scan-btn mini-btn" onClick={() => openExternal(ISSUES_URL)}>问题反馈</button>
+          </div>
+          <div className="hint" style={{ marginTop: 8 }}>
+            启动时会自动检查新版本；有更新时顶栏版本号会亮起，点击直达下载页。
+          </div>
+        </div>
+      </div>
 
       <div className="settings-actions">
         <button className="scan-btn" disabled={saving} onClick={onSave}>{saving ? '保存中…' : '保存配置'}</button>

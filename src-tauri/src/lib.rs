@@ -93,6 +93,8 @@ fn spawn_bridge(app: &tauri::AppHandle) -> Result<Child, String> {
     cmd.arg(&script_str)
         .current_dir(&cwd)
         .env("AGENTSESSIONS_PORT", BRIDGE_PORT)
+        // stdin 管道：宿主死亡（崩溃/强杀/关机）时写端关闭，server.js 据此自杀，孤儿免疫
+        .stdin(Stdio::piped())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err))
         .spawn()
@@ -147,7 +149,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app_handle, event| {
-            if let RunEvent::Exit = event {
+            // 最后一个窗口关闭（ExitRequested）即回收后端，不等进程真正退出；Exit 兜底。
+            // 崩溃/强杀/关机走不到这里，由 server.js 的 stdin 管道守护兜底自杀
+            if matches!(event, RunEvent::Exit | RunEvent::ExitRequested { .. }) {
                 if let Some(state) = app_handle.try_state::<BridgeState>() {
                     kill_bridge(&state);
                 }
