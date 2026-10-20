@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect } from '../api'
+import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect, doScan, fetchCodebuddyStatus, codebuddyLogin, codebuddyLoginPoll } from '../api'
+import type { CodebuddyStatus } from '../api'
 import { eventToHotkey, formatHotkey } from '../hotkey'
 import { IS_TAURI, openExternal, REPO_URL, ISSUES_URL, getAppVersion } from '../lib'
 import type { Account, AppConfig, DetectedAgent } from '../types'
@@ -52,6 +53,72 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
   const [err, setErr] = useState('')
   // 关于面板：当前应用版本
   const [appVersion, setAppVersion] = useState('')
+  // —— CodeBuddy 云端授权卡片 ——
+  const [cbStatus, setCbStatus] = useState<CodebuddyStatus | null>(null)
+  const [cbBusy, setCbBusy] = useState(false)
+  const [cbMsg, setCbMsg] = useState('')
+  const [cbErr, setCbErr] = useState('')
+  const cbPollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  const cbDeadline = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const loadCbStatus = useCallback(() => {
+    fetchCodebuddyStatus().then(setCbStatus).catch(() => {})
+  }, [])
+
+  // 卸载时清理轮询计时器，避免离开设置页后仍在后台轮询
+  useEffect(() => {
+    loadCbStatus()
+    return () => {
+      if (cbPollTimer.current) clearInterval(cbPollTimer.current)
+      if (cbDeadline.current) clearTimeout(cbDeadline.current)
+    }
+  }, [loadCbStatus])
+
+  const stopCbPolling = () => {
+    if (cbPollTimer.current) { clearInterval(cbPollTimer.current); cbPollTimer.current = null }
+    if (cbDeadline.current) { clearTimeout(cbDeadline.current); cbDeadline.current = null }
+  }
+
+  // 授权流程：服务端建授权会话 → 开浏览器登录 → 2s 轮询确认（300s 上限）→ 成功后立即触发一次扫描拉云端会话
+  const onCodebuddyAuth = async () => {
+    setCbBusy(true); setCbMsg(''); setCbErr('')
+    try {
+      const { authUrl, state } = await codebuddyLogin()
+      openExternal(authUrl)
+      setCbMsg('已打开浏览器，请在网页完成 CodeBuddy 登录…')
+      stopCbPolling()
+      cbPollTimer.current = setInterval(async () => {
+        try {
+          const r = await codebuddyLoginPoll(state)
+          if (r.done) {
+            stopCbPolling()
+            setCbBusy(false)
+            loadCbStatus()
+            setCbMsg(`授权成功${r.account?.nickname ? '：' + r.account.nickname : ''}，正在拉取云端会话…`)
+            try {
+              const s = await doScan()
+              setCbMsg(`授权成功，云端会话已入库（本次扫描共 ${s.stats.sessions} 会话）`)
+            } catch {
+              setCbMsg('授权成功；云端会话将在下次自动扫描时拉取')
+            }
+          } else if (r.error) {
+            stopCbPolling()
+            setCbBusy(false)
+            setCbErr('授权失败：' + r.error)
+          }
+        } catch { /* 网络抖动：下一拍继续 */ }
+      }, 2000)
+      cbDeadline.current = setTimeout(() => {
+        stopCbPolling()
+        setCbBusy(false)
+        loadCbStatus()
+        setCbErr('授权超时（5 分钟未完成）。请重试；若已在网页完成登录，刷新后状态会自动更新。')
+      }, 300_000)
+    } catch (e) {
+      setCbErr('发起授权失败：' + (e as Error).message)
+      setCbBusy(false)
+    }
+  }
 
   useEffect(() => { getAppVersion().then(setAppVersion).catch(() => {}) }, [])
 
@@ -266,6 +333,54 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
               })}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h3>CodeBuddy 云端授权</h3>
+        <div className="stats-body">
+          <div className="scan-setting" style={{ flexWrap: 'wrap', gap: 10 }}>
+            {!cbStatus ? (
+              <span className="meta-tag agent-dim">状态加载中…</span>
+            ) : !cbStatus.installed ? (
+              <span className="meta-tag" style={{ color: '#cf222e' }}>未授权</span>
+            ) : cbStatus.stale ? (
+              <span className="meta-tag" style={{ color: '#cf222e' }}>授权已过期，需重新授权</span>
+            ) : !cbStatus.authenticated ? (
+              <span className="meta-tag agent-dim">登录已过期 · 下次拉取自动刷新</span>
+            ) : (
+              <span className="meta-tag">
+                已授权{cbStatus.account?.nickname ? ' · ' + cbStatus.account.nickname : ''}
+              </span>
+            )}
+            {cbStatus?.version && <span className="meta-tag agent-dim">CLI v{cbStatus.version}</span>}
+            <button className="scan-btn mini-btn" disabled={cbBusy} onClick={onCodebuddyAuth}>
+              {cbBusy ? '等待授权…' : cbStatus?.installed && !cbStatus.stale ? '重新授权' : '授权'}
+            </button>
+          </div>
+          <div className="hint" style={{ marginTop: 8 }}>
+            {cbStatus?.installed
+              ? `凭据：${cbStatus.file}（仅存本机${cbStatus.expiresAt ? `，有效期至 ${new Date(cbStatus.expiresAt).toLocaleString('zh-CN')}` : ''}）`
+              : '尚未检测到 CodeBuddy 登录凭据。点击「授权」后在浏览器完成一次登录，本应用即可静默拉取其云端会话（CLI 与桌面 IDE 共享登录态）。'}
+          </div>
+          {cbStatus?.installed && cbStatus.accounts.length > 0 && (
+            <div className="hint" style={{ marginTop: 4 }}>
+              共 {cbStatus.accounts.length} 个账号（当前：{cbStatus.account?.nickname || cbStatus.account?.uid.slice(0, 8) || '未知'}）
+              {cbStatus.accounts.length > 1 ? '。云端拉取跟随 CodeBuddy 当前登录账号——在 CodeBuddy 侧切换账号后，下次扫描自动拉取该账号的云端会话；重新授权不会丢失其他账号档案。' : ''}
+            </div>
+          )}
+          {cbStatus?.cloud && (
+            <div className="hint" style={{ marginTop: 4 }}>
+              最近一次云端拉取：{cbStatus.cloud.checkedAt ? new Date(cbStatus.cloud.checkedAt).toLocaleString('zh-CN') : '尚未运行'}
+              {cbStatus.cloud.ok === true
+                ? ` · 正常（本次新拉 ${cbStatus.cloud.pulled} 会话）`
+                : cbStatus.cloud.ok === false
+                  ? ` · 失败：${cbStatus.cloud.reason || '未知原因'}`
+                  : ''}
+            </div>
+          )}
+          {cbMsg && <div className="status" style={{ color: '#1a7f37', marginTop: 4 }}>{cbMsg}</div>}
+          {cbErr && <div className="status" style={{ color: '#cf222e', marginTop: 4 }}>{cbErr}</div>}
         </div>
       </div>
 

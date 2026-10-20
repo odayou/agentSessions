@@ -12,6 +12,8 @@ const path = require('node:path')
 const os = require('node:os')
 const { classifyPurpose } = require('../src/purpose')
 const { findJsonlFiles, buildSubjects } = require('./lib')
+const cli = require('../src/codebuddy-cli')
+const cloud = require('../src/codebuddy-cloud')
 
 const PROJECTS_DIR = path.join(os.homedir(), '.codebuddy', 'projects')
 const DESKTOP_DIR = process.env.APPDATA
@@ -196,16 +198,42 @@ function resolveDesktop(convId, b64, triggerFile) {
   }
 }
 
-// 列出源文件（增量扫描用）：CLI jsonl + 桌面版会话目录 + edit-sessions（两路触发同一会话聚合）
+// —— 内容块解析助手（CLI jsonl transcript 用，与 workbuddy.js 同一格式族） ——
+function parseBlock(b) {
+  if (!b || typeof b !== 'object') return ''
+  if (b.type === 'text' || b.type === 'input_text' || b.type === 'output_text') return String(b.text || '')
+  return ''
+}
+
+function parseToolUse(b) {
+  try {
+    const input = typeof b.input === 'string' ? b.input : (b.input != null ? JSON.stringify(b.input) : '')
+    return { name: b.name || 'tool', input: (input || '').slice(0, 8000), output: undefined }
+  } catch { return null }
+}
+
+function parseThinking(b) {
+  return typeof b.thinking === 'string' ? b.thinking : String(b.thinking || '')
+}
+
+// 列出源文件（增量扫描用）：CLI jsonl + 桌面版会话目录 + edit-sessions + 桌面版本地消息目录。
+// 单写者原则：有本地消息正文的会话由 messages 目录独家产出，其 genie-history 占位目录与
+// edit-sessions 不再作为源——upsert 冲突分支后写者胜，元数据空轮次会覆盖已升级的正文轮次。
 function sources(sourceDir) {
   const out = findJsonlFiles(sourceDir || PROJECTS_DIR)
   try {
+    // 桌面版本地消息（正文全文）：messages 目录为源（目录指纹捕获新增消息；消息文件一次性写入不回改）
+    const fullConvs = new Set()
+    for (const c of cloud.listConversations()) {
+      if (c.hasMessages) { fullConvs.add(c.convId); out.push(c.msgDir) }
+    }
     const gh = path.join(DESKTOP_DIR, 'genie-history')
     if (fs.existsSync(gh)) {
       for (const b64 of fs.readdirSync(gh)) {
         const convDir = path.join(gh, b64, 'conversations')
         if (!fs.existsSync(convDir)) continue
         for (const conv of fs.readdirSync(convDir)) {
+          if (fullConvs.has(conv)) continue // 正文通道接管
           const p = path.join(convDir, conv)
           try { if (fs.statSync(p).isDirectory()) out.push(p) } catch { /* 跳过 */ }
         }
@@ -214,16 +242,19 @@ function sources(sourceDir) {
     const es = path.join(DESKTOP_DIR, 'edit-sessions')
     if (fs.existsSync(es)) {
       for (const f of fs.readdirSync(es)) {
-        if (f.endsWith('.json')) out.push(path.join(es, f))
+        if (f.endsWith('.json') && !fullConvs.has(f.slice(0, -5))) out.push(path.join(es, f))
       }
     }
   } catch { /* 桌面版数据缺失/不可读时忽略 */ }
   return out
 }
 
-// 解析单个源文件：按路径特征分流 CLI 转写 / 桌面版会话
+// 解析单个源文件：按路径特征分流 CLI 转写 / 桌面版会话 / 桌面版本地消息正文
 function parseFile(file) {
   const norm = String(file).replace(/\\/g, '/')
+  if (norm.includes('/CodeBuddyExtension/Data/') && norm.includes('/CodeBuddyIDE/') && norm.endsWith('/messages')) {
+    return parseDesktopMessages(file)
+  }
   if (norm.includes('/genie-history/') && norm.includes('/conversations/')) {
     return resolveDesktop(path.basename(file), path.basename(path.dirname(path.dirname(file))), file)
   }
@@ -231,6 +262,19 @@ function parseFile(file) {
     return resolveDesktop(path.basename(file, '.json'), null, file)
   }
   return parseTranscript(file)
+}
+
+// 桌面版本地消息正文：.../history/<hash>/<convId>/messages → 全量解析该会话
+function parseDesktopMessages(file) {
+  const convDir = path.dirname(file)
+  const hashDir = path.dirname(convDir)
+  const convId = path.basename(convDir)
+  const hit = convCwdMap().get(convId)
+  const conv = cloud.convMetaOf(hashDir, convId)
+  if (!conv || !hit || !hit.cwd) return null
+  const item = cloud.buildSessionItem(conv, hit.cwd, sandboxRootOf)
+  if (item) item.subjects = buildSubjects(item.turns)
+  return item
 }
 
 // 扫描全部源（projects jsonl + 桌面版），返回 { session, project, turns, subjects } 数组
@@ -388,4 +432,165 @@ function parseTranscript(file) {
   }
 }
 
-module.exports = { scan, sources, parseFile, id: 'codebuddy', label: 'CodeBuddy', sourceDir: PROJECTS_DIR, sourceFormat: 'jsonl/codebuddy-transcript+desktop-metadata' }
+// —— 云端通道（阶段 1c）：CLI serve → sessions → replay，与文件通道并存 ——
+// 增量：按库内 cloud: 源会话的 updatedAt 比对；失败静默（记 cloudState 供设置页展示），不影响文件通道
+
+let cloudState = { ok: null, reason: null, checkedAt: null, total: 0, pulled: 0 }
+function getCloudState() {
+  return { ...cloudState }
+}
+
+// replay（ACP 事件流）→ turns；规则与 parseTranscript 一致：user_message_chunk 开轮，agent/工具归轮
+function replayToTurns(events) {
+  const evs = []
+  for (const e of Array.isArray(events) ? events : []) {
+    const u = e && e.update
+    if (!u || typeof u !== 'object' || typeof u.sessionUpdate !== 'string') continue
+    const ts = parseTs(e._meta && e._meta.timestamp)
+    const blocks = Array.isArray(u.content) ? u.content : (u.content ? [u.content] : [])
+    const text = blocks.map((b) => (b && (b.type === 'text' || b.type === 'input_text' || b.type === 'output_text') && typeof b.text === 'string' ? b.text : '')).filter(Boolean).join('\n')
+    if (u.sessionUpdate === 'user_message_chunk') {
+      if (text) evs.push({ ts, kind: 'user', text })
+    } else if (u.sessionUpdate === 'agent_message_chunk') {
+      if (text) evs.push({ ts, kind: 'asst', text, thinking: '', tools: [] })
+    } else if (u.sessionUpdate === 'tool_call') {
+      const tools = []
+      if (u.rawInput != null) tools.push({ name: u.title || u.kind || 'tool', input: typeof u.rawInput === 'string' ? u.rawInput : JSON.stringify(u.rawInput) })
+      const files = (Array.isArray(u.locations) ? u.locations : []).map((l) => (l && l.path) || '').filter(Boolean)
+      if (tools.length || files.length) evs.push({ ts, kind: 'asst', text: '', thinking: '', tools, files })
+    }
+    // tool_call_update / session_info_update / available_commands_update 等不进正文
+  }
+
+  const turns = []
+  let cur = null
+  for (const ev of evs) {
+    if (ev.kind === 'user') {
+      cur = { seq: turns.length, userMessage: ev.text, assistantMessage: null, thinking: null, toolInput: null, filesChanged: [], timestamp: ev.ts, subject: null }
+      turns.push(cur)
+    } else if (cur) {
+      if (ev.text) cur.assistantMessage = (cur.assistantMessage ? cur.assistantMessage + '\n' : '') + ev.text
+      if (ev.thinking) cur.thinking = (cur.thinking ? cur.thinking + '\n' : '') + ev.thinking
+      if (ev.tools && ev.tools.length) {
+        const entries = ev.tools.map((t) => JSON.stringify(t)).join('\n')
+        cur.toolInput = cur.toolInput ? cur.toolInput + '\n' + entries : entries
+        for (const t of ev.tools) {
+          try {
+            const parsed = JSON.parse(t.input)
+            if (parsed.file_path) cur.filesChanged.push(String(parsed.file_path))
+            if (parsed.path) cur.filesChanged.push(String(parsed.path))
+          } catch { /* 非 JSON 跳过 */ }
+        }
+      }
+      if (ev.files) {
+        for (const f of ev.files) if (!cur.filesChanged.includes(f)) cur.filesChanged.push(f)
+      }
+    }
+  }
+  for (const t of turns) t.subject = classifyPurpose(t.userMessage || '', [])
+  return turns.filter((t) => t.userMessage || t.assistantMessage || t.thinking)
+}
+
+// history 降级：replay 失败/无正文时用 userInput + finalReply（≤500 截断）组轮
+async function historyTurns(handle, s) {
+  try {
+    const r = await cli.api(handle, `/api/v1/sessions/${s.id}/history`, { query: { cwd: s.cwd } })
+    const reqs = r && Array.isArray(r.requests) ? r.requests : []
+    const turns = []
+    for (const q of reqs) {
+      if (!q || (!q.userInput && !q.finalReply)) continue
+      turns.push({
+        seq: turns.length,
+        userMessage: q.userInput || null,
+        assistantMessage: q.finalReply || null,
+        thinking: null,
+        toolInput: null,
+        filesChanged: [],
+        timestamp: s.updatedAt || s.createdAt || null,
+        subject: classifyPurpose(q.userInput || '', []),
+      })
+    }
+    return turns
+  } catch { return [] }
+}
+
+// 云端拉取：serve → sessions?cwd=* → 增量比对库内 cloud 会话 updatedAt → replay（history 降级）→ UnifiedSession
+async function scanAll(db) {
+  const out = []
+  cloudState = { ok: false, reason: null, checkedAt: Date.now(), total: 0, pulled: 0 }
+  try {
+    const st = cli.credentialState()
+    if (!st.authenticated) {
+      cloudState.reason = st.installed ? '授权已过期，需重新授权' : '未授权（设置页 CodeBuddy 卡片授权）'
+      return out
+    }
+    if (!cli.resolveEntry()) {
+      cloudState.reason = 'CLI 未集成（缺少 @tencent-ai/codebuddy-code）'
+      return out
+    }
+    const handle = await cli.serve({ timeoutMs: 30000 })
+    try {
+      const listed = await cli.api(handle, '/api/v1/sessions', { query: { cwd: '*' } })
+      const sessions = listed && Array.isArray(listed.sessions) ? listed.sessions : []
+      cloudState.total = sessions.length
+
+      // 库内已有会话 → 增量（按 agentSessionId 精确比对 updatedAt）。不依赖 source_file：
+      // upsertSession 冲突分支不更新 source_file，jsonl 通道先落库同一会话时 cloud: 前缀不存在
+      const known = new Map()
+      const ids = sessions.map((s) => s && s.id).filter(Boolean)
+      if (db && ids.length) {
+        try {
+          for (let i = 0; i < ids.length; i += 500) {
+            const chunk = ids.slice(i, i + 500)
+            const ph = chunk.map(() => '?').join(',')
+            for (const r of db.prepare(`SELECT agent_session_id AS sid, updated_at FROM sessions WHERE agent_id = 'codebuddy' AND agent_session_id IN (${ph})`).all(...chunk)) {
+              known.set(r.sid, r.updated_at)
+            }
+          }
+        } catch { /* 查询异常时退化为全量拉取 */ }
+      }
+
+      for (const s of sessions) {
+        if (!s || !s.id || !s.cwd) continue
+        const prev = known.get(s.id)
+        if (prev != null && !(typeof s.updatedAt === 'number' && s.updatedAt > prev)) continue // 未变更
+
+        let turns = []
+        try {
+          const rp = await cli.api(handle, `/api/v1/sessions/${s.id}/replay`, { query: { cwd: s.cwd } })
+          turns = replayToTurns(rp && rp.events)
+        } catch { /* replay 失败走 history 降级 */ }
+        if (!turns.length) turns = await historyTurns(handle, s)
+        if (!turns.length) continue // 无正文的空壳会话（playground 等）不入库，下次扫描重试
+
+        const sandbox = sandboxRootOf(s.cwd)
+        const title = (s.name && String(s.name).trim()) || (turns[0].userMessage ? turns[0].userMessage.replace(/\s+/g, ' ').slice(0, 80) : `CodeBuddy 会话 ${s.id.slice(0, 8)}`)
+        out.push({
+          session: {
+            agentSessionId: s.id,
+            cwd: s.cwd,
+            title,
+            model: null,
+            createdAt: s.createdAt || s.updatedAt || null,
+            updatedAt: s.updatedAt || s.createdAt || null,
+            sourceFile: `cloud:${s.id}`,
+            meta: { note: 'CodeBuddy CLI 云端会话（serve 拉取' + (sandbox ? `，沙箱目录 ${s.cwd}` : '') + '）' },
+          },
+          project: { cwd: sandbox || s.cwd, name: path.basename(sandbox || s.cwd) || s.cwd },
+          turns,
+          subjects: buildSubjects(turns),
+        })
+        cloudState.pulled++
+      }
+    } finally {
+      handle.stop()
+    }
+  } catch (e) {
+    cloudState.reason = e.message
+    return out
+  }
+  cloudState.ok = true
+  return out
+}
+
+module.exports = { scan, sources, parseFile, scanAll, getCloudState, id: 'codebuddy', label: 'CodeBuddy', sourceDir: PROJECTS_DIR, sourceFormat: 'jsonl/codebuddy-transcript+desktop-metadata+cloud-scan' }

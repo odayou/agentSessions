@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { doScan, ping, fetchStats, fetchConfig } from './api'
+import { doScan, ping, fetchStats, fetchConfig, type CodebuddyCredentialState } from './api'
 import ProjectsView from './views/ProjectsView'
 import SessionView from './views/SessionView'
 import StatsView from './views/StatsView'
@@ -265,11 +265,12 @@ export default function App() {
 }
 
 // 底部状态栏（readme §6.1）：已索引量 + 最近扫描时间，让自动增量扫描"看得见"；
-// 右侧常驻当前版本号，有新版时高亮为可点击的更新提示
+// 右侧常驻当前版本号，有新版时高亮为可点击的更新提示。
+// CodeBuddy 已安装但未授权/授权过期时显示红色提醒，点击跳设置页授权。
 function StatusBar({ refreshKey, appVersion, newVersion, onCheckUpdate }: {
   refreshKey: number; appVersion: string; newVersion: string | null; onCheckUpdate: () => void
 }) {
-  const [info, setInfo] = useState<{ stats: Stats; lastScanAt: number } | null>(null)
+  const [info, setInfo] = useState<{ stats: Stats; lastScanAt: number; codebuddy?: CodebuddyCredentialState | null } | null>(null)
 
   useEffect(() => {
     let alive = true
@@ -278,6 +279,11 @@ function StatusBar({ refreshKey, appVersion, newVersion, onCheckUpdate }: {
     const t = setInterval(load, 60 * 1000)
     return () => { alive = false; clearInterval(t) }
   }, [refreshKey])
+
+  const cb = info?.codebuddy
+  // 红点条件：有凭据文件且已失效（refresh token 过期/无 token，须重新登录）。
+  // access token 过期但 refresh 未过期属瞬态（下次拉取自动刷新），不提醒
+  const cbNeedsAuth = !!cb && cb.installed && cb.stale
 
   const lastScan = !info?.lastScanAt
     ? '未扫描'
@@ -294,6 +300,15 @@ function StatusBar({ refreshKey, appVersion, newVersion, onCheckUpdate }: {
           ? <>已索引 {info.stats.totalSessions.toLocaleString()} 会话 · {info.stats.totalProjects} 项目 · {info.stats.byAgent.length} 个 Agent · 最后扫描 {lastScan}</>
           : '…'}
       </span>
+      {cbNeedsAuth ? (
+        <button
+          className="statusbar-cb-auth"
+          title={cb!.stale ? 'CodeBuddy 云端授权已过期，点击前往设置页重新授权' : 'CodeBuddy 未授权，点击前往设置页完成授权'}
+          onClick={() => { location.hash = '#/settings' }}
+        >
+          <span className="cb-dot" aria-hidden />{cb!.stale ? 'CodeBuddy 授权已过期' : 'CodeBuddy 未授权'}
+        </button>
+      ) : null}
       {newVersion ? (
         <button className="statusbar-version statusbar-update" title={`有新版本 v${newVersion}，点击前往下载`} onClick={onCheckUpdate}>
           v{appVersion} → v{newVersion}

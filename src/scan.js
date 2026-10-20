@@ -92,8 +92,9 @@ function isChanged(db, agentId, file, maxSizeMB, oversized, enforceMaxSize = tru
   }
 }
 
-// 扫描链路，返回统计；opts.cfg 可注入配置（点测用，缺省读全局配置）
-function runScan(dbPath, { only, cfg } = {}) {
+// 扫描链路，返回统计；opts.cfg 可注入配置（点测用，缺省读全局配置）。
+// async：codebuddy 等适配器的 scanAll 走本地 HTTP 拉取（CLI serve），需等待
+async function runScan(dbPath, { only, cfg } = {}) {
   const db = openStore(dbPath)
   const cfg2 = cfg || config.loadConfig()
   const detected = detectAll(cfg2)
@@ -136,7 +137,9 @@ function runScan(dbPath, { only, cfg } = {}) {
 
       let sc = 0
       let tc = 0
+      let handled = false
       if (ag.dbCandidates) {
+        handled = true
         // sqlite 源（opencode/cursor/kiro）：遍历全部存在的候选库逐库扫描 + 记录各库文件指纹；
         // 每库可含多个会话（cursor/kiro），手动路径优先；单库解析失败（schema 漂移/损坏）
         // 不中断整体扫描，降级记录错误（agentList §五：解析失败时容错降级）
@@ -158,16 +161,8 @@ function runScan(dbPath, { only, cfg } = {}) {
           stats.agents.push({ id, label: adapter.label, status: 'error', error: scanErr })
           continue
         }
-      } else if (adapter.scanAll) {
-        // 外部进程源（agentList §6.2 协议）：一次性扫描，无文件指纹可增量；失败不中断整体扫描
-        try {
-          const r = persist(db, id, adapter, adapter.scanAll(), cfg2)
-          sc = r.sessions; tc = r.turns
-        } catch (e) {
-          stats.agents.push({ id, label: adapter.label, status: 'error', error: e.message })
-          continue
-        }
       } else if (adapter.sources && adapter.parseFile) {
+        handled = true
         // jsonl/json 目录源（claude-code/workbuddy/cline/aider 等）：逐文件指纹，仅解析已变更文件；
         // parseFile 可返回单会话或会话数组（aider 单文件多运行 → 多会话）；手动路径优先
         const root = (cfg2.agentPaths || {})[id] || adapter.sourceDir || (ag.sourceDir ? ag.sourceDir() : null)
@@ -184,6 +179,25 @@ function runScan(dbPath, { only, cfg } = {}) {
             const r = persist(db, id, adapter, [item], cfg2)
             sc += r.sessions; tc += r.turns
           }
+        }
+      }
+      if (adapter.scanAll && !handled) {
+        // 外部进程源（agentList §6.2 协议）：一次性扫描，无文件指纹可增量；失败不中断整体扫描
+        try {
+          const r = persist(db, id, adapter, await adapter.scanAll(db), cfg2)
+          sc = r.sessions; tc = r.turns
+        } catch (e) {
+          stats.agents.push({ id, label: adapter.label, status: 'error', error: e.message })
+          continue
+        }
+      } else if (adapter.scanAll) {
+        // 附加 API 通道（codebuddy 云端拉取）：与文件通道并存，适配器自管增量（按库内 updatedAt）；
+        // 失败只记日志，不拖垮文件通道
+        try {
+          const r = persist(db, id, adapter, await adapter.scanAll(db), cfg2)
+          sc += r.sessions; tc += r.turns
+        } catch (e) {
+          console.error(`[agentsessions] ${id} API 通道失败：${e.message}`)
         }
       }
       stats.sessions += sc

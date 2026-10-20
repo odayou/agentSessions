@@ -34,12 +34,13 @@ function main() {
     }
     case 'scan': {
       console.log(`数据库：${dbPath}`)
-      const res = runScan(dbPath, { only: opt.only })
-      if (!res.ok) { console.error('扫描失败：', res.error); process.exit(1) }
-      for (const a of res.stats.agents) {
-        console.log(`  ${a.label.padEnd(12)} ${a.status}${a.sessions != null ? ` (${a.sessions} 会话)` : ''}`)
-      }
-      console.log(`共 ${res.stats.sessions} 会话, ${res.stats.turns} 轮次`)
+      runScan(dbPath, { only: opt.only }).then((res) => {
+        if (!res.ok) { console.error('扫描失败：', res.error); process.exit(1) }
+        for (const a of res.stats.agents) {
+          console.log(`  ${a.label.padEnd(12)} ${a.status}${a.sessions != null ? ` (${a.sessions} 会话)` : ''}`)
+        }
+        console.log(`共 ${res.stats.sessions} 会话, ${res.stats.turns} 轮次`)
+      }).catch((e) => { console.error('扫描失败：', e.message); process.exit(1) })
       break
     }
     case 'search': {

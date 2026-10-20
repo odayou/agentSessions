@@ -12,6 +12,8 @@ const { exportSession } = require('./src/export')
 const config = require('./src/config')
 const store = require('./src/store')
 const q = require('./src/query')
+const cbCli = require('./src/codebuddy-cli')
+const cbAdapter = require('./adapters/codebuddy')
 
 const PORT = Number(process.env.AGENTSESSIONS_PORT) || 18778
 const DB_PATH = process.env.AGENTSESSIONS_DB || defaultDbPath()
@@ -29,11 +31,11 @@ let lastAutoScanAt = 0
 let lastScanAt = 0 // 最近一次扫描完成时间（手动/自动/配置触发均更新，供状态栏展示）
 let lastAgents = [] // 最近一次扫描的 agent 明细（含 placeholder"已安装未索引"），供设置页展示
 let autoScanning = false
-function autoScan(trigger) {
+async function autoScan(trigger) {
   if (autoScanning) return
   autoScanning = true
   try {
-    const r = runScan(DB_PATH)
+    const r = await runScan(DB_PATH)
     lastAutoScanAt = Date.now()
     lastScanAt = lastAutoScanAt
     // 无论成败都更新明细：失败 agent（status:'error'）也要让设置页看到真实状态
@@ -111,7 +113,7 @@ async function handle(req, res) {
       }
       case '/api/scan': {
         // POST 触发扫描（异步走会耗时，这里同步完成）
-        const res2 = runScan(DB_PATH, { only: qs.only })
+        const res2 = await runScan(DB_PATH, { only: qs.only })
         lastScanAt = Date.now()
         lastAgents = (res2.stats && res2.stats.agents) || [] // 失败也更新（含 status:'error' 明细）
         if (!res2.ok) { send(res, 500, { ok: false, error: res2.error, stats: res2.stats }); return }
@@ -178,7 +180,10 @@ async function handle(req, res) {
       case '/api/stats': {
         const days = Math.min(Math.max(Number(qs.days) || 30, 1), 365)
         // agents：最近一次扫描的探测明细（ok=已索引，placeholder=已安装暂不支持索引）
-        send(res, 200, { ok: true, stats: q.stats(DB_PATH, { days }), lastScanAt, agents: lastAgents })
+        // codebuddy：轻量登录态（文件级检查，不拉 serve），供状态栏失效红点判断；异常不影响 stats 本体
+        let cbState = null
+        try { cbState = cbCli.credentialState() } catch { cbState = null }
+        send(res, 200, { ok: true, stats: q.stats(DB_PATH, { days }), lastScanAt, agents: lastAgents, codebuddy: cbState })
         return
       }
       case '/api/project/rename': {
@@ -217,6 +222,36 @@ async function handle(req, res) {
         }
         send(res, 200, { ok: true, config: config.loadConfig() })
         return
+      case '/api/codebuddy/status':
+        // 登录态（凭据文件级判断，秒回，不拉 serve）+ CLI 版本 + 最近一次云端拉取状态
+        send(res, 200, {
+          ok: true,
+          ...cbCli.credentialState(),
+          version: (cbCli.resolveEntry() || {}).version || null,
+          cloud: cbAdapter.getCloudState(),
+        })
+        return
+      case '/api/codebuddy/login': {
+        // 发起授权：创建授权会话，返回 authUrl（前端开浏览器）+ state（前端轮询凭据）
+        if (req.method !== 'POST') { send(res, 405, { ok: false, error: 'POST only' }); return }
+        try {
+          const login = await cbCli.beginLogin()
+          send(res, 200, { ok: true, ...login })
+        } catch (e) { send(res, 502, { ok: false, error: e.message }) }
+        return
+      }
+      case '/api/codebuddy/login/poll': {
+        // 单次 token 查询（前端每 2s 调）：pending 或 done（done 时已写凭据文件，CLI watcher 接管）
+        const state = qs.state
+        if (!state) { send(res, 400, { ok: false, error: 'missing state' }); return }
+        try {
+          const r = await cbCli.checkLogin(state)
+          send(res, 200, { ok: true, ...r })
+        } catch (e) {
+          send(res, 200, { ok: true, pending: true, error: e.message }) // 瞬时错误按 pending 处理
+        }
+        return
+      }
       case '/api/ping':
         send(res, 200, { ok: true, db: DB_PATH })
         return

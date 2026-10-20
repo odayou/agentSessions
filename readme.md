@@ -66,7 +66,7 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 | Cline             | ✅ 完整支持   | `~/.cline/data/tasks/`（三端共用）+ 旧版 VS Code globalStorage 兜底 |
 | Roo Code          | ✅ 完整支持   | 与 Cline 共享任务解析，checkpoint git 目录自动跳过                   |
 | Codex CLI         | ✅ 基础支持   | 读取`~/.codex/sessions`，解析 rollout JSONL 格式                    |
-| CodeBuddy         | ✅ 基础支持   | CLI 读 `~/.codebuddy/projects` 转写 JSONL；桌面版（CodeBuddy CN）正文在云端，索引本地会话元数据（标题线索/时间/项目/文件变更），详情可能为空 |
+| CodeBuddy         | ✅ 完整支持   | CLI JSONL + serve 云端会话拉取（设置页一次授权，失效红点提醒）；桌面版消息正文明文本地可读，元数据兜底 |
 | 通义灵码 (Lingma) | ✅ 基础支持   | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件                        |
 | Trae SOLO 桌面版  | ✅ 基础支持   | 读取`AppData/Roaming/TRAE SOLO CN`，加密库能力受限                  |
 | Copilot CLI       | ✅ 基础支持   | events.jsonl 多形状容错 + workspace.yaml 项目关联                    |

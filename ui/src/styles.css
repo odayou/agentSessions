@@ -251,6 +251,13 @@ button.statusbar-update {
   border: none; background: #fff8c5; border-radius: 8px; padding: 0 8px; cursor: pointer;
   color: #7d4e00; font-weight: 600; font-size: 12px; font-family: inherit;
 }
+/* CodeBuddy 授权失效提醒（状态栏）：红点 + 文案，点击跳设置页 */
+button.statusbar-cb-auth {
+  flex: none; display: inline-flex; align-items: center; gap: 5px;
+  border: none; background: #ffebe9; border-radius: 8px; padding: 0 8px; cursor: pointer;
+  color: #cf222e; font-weight: 600; font-size: 12px; font-family: inherit;
+}
+.cb-dot { width: 7px; height: 7px; border-radius: 50%; background: #cf222e; }
 
 /* 星标按钮（会话详情） */
 .star-btn.starred { color: #b58900; border-color: #e0c252; }

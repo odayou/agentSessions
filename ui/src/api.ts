@@ -72,9 +72,20 @@ export function fetchContext(id: string) {
   return get<{ ok: boolean; title: string | null; text: string }>(`/context?id=${encodeURIComponent(id)}`)
 }
 
-// M4 统计
+// M4 统计（codebuddy：轻量登录态，供状态栏失效红点；服务端异常时为 null）
+export interface CodebuddyCredentialState {
+  installed: boolean
+  authenticated: boolean
+  stale: boolean
+  account: { uid: string; nickname?: string; type?: string } | null
+  accounts?: CodebuddyAccountBrief[]
+  expiresAt: number | null
+  refreshExpiresAt: number | null
+  file: string
+}
+
 export function fetchStats(days = 30) {
-  return get<{ stats: Stats; lastScanAt: number; agents: DetectedAgent[] }>(`/stats?days=${days}`)
+  return get<{ stats: Stats; lastScanAt: number; agents: DetectedAgent[]; codebuddy?: CodebuddyCredentialState | null }>(`/stats?days=${days}`)
 }
 
 // 项目自定义命名（name 为空 = 恢复自动命名）
@@ -119,4 +130,45 @@ export async function saveConfig(patch: Partial<AppConfig>) {
 export async function ping() {
   const r = await fetch(`${BASE}/ping`)
   return r.ok
+}
+
+// —— CodeBuddy 云端授权（CLI serve 通道） ——
+// accounts 为账号档案注册表摘要（无 token）；serve 拉取用顶层 account（当前账号），
+// 用户在 CodeBuddy 侧切换账号后，下次扫描自动拉新账号的云端会话
+export interface CodebuddyAccountBrief {
+  uid: string
+  nickname?: string
+  type?: string
+  lastLogin?: boolean
+}
+
+export interface CodebuddyStatus {
+  ok: boolean
+  installed: boolean
+  authenticated: boolean
+  stale: boolean
+  account: { uid: string; nickname?: string; type?: string } | null
+  accounts: CodebuddyAccountBrief[]
+  expiresAt: number | null
+  refreshExpiresAt: number | null
+  file: string
+  version: string | null
+  cloud: { ok: boolean | null; reason: string | null; checkedAt: number | null; total: number; pulled: number }
+}
+
+export function fetchCodebuddyStatus() {
+  return get<CodebuddyStatus>('/codebuddy/status')
+}
+
+// 发起授权：返回 authUrl（前端开浏览器）+ state（前端轮询）
+export async function codebuddyLogin() {
+  const r = await fetch(`${BASE}/codebuddy/login`, { method: 'POST' })
+  const d = await r.json()
+  if (!r.ok || !d.ok) throw new Error(d.error || 'login failed')
+  return { authUrl: d.authUrl as string, state: d.state as string }
+}
+
+// 单次授权轮询：pending（未完成浏览器登录）或 done（已写凭据；accountCount=合并后的账号档案数）
+export function codebuddyLoginPoll(state: string) {
+  return get<{ ok: boolean; pending?: boolean; done?: boolean; account?: { uid: string; nickname?: string }; accountCount?: number; error?: string }>(`/codebuddy/login/poll?state=${encodeURIComponent(state)}`)
 }

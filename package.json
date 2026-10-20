@@ -9,7 +9,7 @@
     "as": "src/cli.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18.20.8"
   },
   "scripts": {
     "scan": "node src/cli.js scan",
@@ -21,7 +21,8 @@
     "build:app": "cd ui && npm run tauri build"
   },
   "dependencies": {
-    "better-sqlite3": "^9.6.0"
+    "better-sqlite3": "^9.6.0",
+    "@tencent-ai/codebuddy-code": "2.170.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0"
