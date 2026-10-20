@@ -1,0 +1,7 @@
+# Cargo 构建配置（此处的 [build] 才会被 cargo 读取；Cargo.toml 里的 [build] 是无效 key）
+[build]
+# 并行 rustc 进程数：默认=CPU 核数，多进程同时编译是内存峰值大户；
+# 内存紧张的机器上限制为 2 可避免 rustc "memory allocation failed" OOM（代价是编译变慢，
+# 内存充裕时可删除此行恢复默认）
+# jobs = 2
+rustflags = ["-A", "dead_code", "-A", "unused_variables", "-A", "unused_imports"]

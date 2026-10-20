@@ -62,7 +62,7 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
       setAutoScan(c.autoScanMinutes)
       setAgentPaths(c.agentPaths || {})
       setMaxSize(c.maxFileSizeMB ?? 50)
-      setManifestRepo(c.manifestRepo || '')
+      setManifestRepo(c.manifestRepo || 'https://raw.githubusercontent.com/odayou/agentsessions-manifests/main/agent-manifests.json')
       setManifestRefresh(c.manifestRefreshMinutes ?? 60)
       setHotkey(c.searchHotkey || '/')
     }).catch((e) => setErr(String(e)))
@@ -121,7 +121,7 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
       setConfig(saved)
       setExcludesText(saved.excludes.join('\n'))
       setAgentPaths(saved.agentPaths || {})
-      setManifestRepo(saved.manifestRepo || '')
+      setManifestRepo(saved.manifestRepo || 'https:/raw.githubusercontent.com/odayou/agentsessions-manifests/main/agent-manifests.json')
       setManifestRefresh(saved.manifestRefreshMinutes ?? 60)
       setHotkey(saved.searchHotkey || '/')
       setMsg('已保存，服务端已自动重扫（排除规则即时生效）')
@@ -280,7 +280,7 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
             className="settings-input"
             style={{ width: '100%' }}
             value={manifestRepo}
-            placeholder="如 https://example.com/agentsessions-manifests（留空关闭）"
+            placeholder="如 https://raw.githubusercontent.com/odayou/agentsessions-manifests/main/agent-manifests.json（官方清单仓库，留空关闭）"
             onChange={(e) => setManifestRepo(e.target.value)}
             spellCheck={false}
           />

@@ -28,5 +28,7 @@ lto = true
 strip = true
 panic = "abort"
 
-[build]
-rustflags = ["-A", "dead_code", "-A", "unused_variables", "-A", "unused_imports"]
+# dev 编译只生成行号表（不生成完整调试信息），显著降低 rustc 内存峰值——
+# 桌面壳 dev 场景无需完整符号，内存紧张机器上可避免 "memory allocation failed" OOM
+[profile.dev]
+debug = "line-tables-only"

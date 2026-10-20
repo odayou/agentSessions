@@ -66,7 +66,7 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 | Cline             | ✅ 完整支持   | `~/.cline/data/tasks/`（三端共用）+ 旧版 VS Code globalStorage 兜底 |
 | Roo Code          | ✅ 完整支持   | 与 Cline 共享任务解析，checkpoint git 目录自动跳过                   |
 | Codex CLI         | ✅ 基础支持   | 读取`~/.codex/sessions`，解析 rollout JSONL 格式                    |
-| CodeBuddy         | ✅ 基础支持   | 读取`~/.codebuddy/projects`，解析 transcript JSONL 格式             |
+| CodeBuddy         | ✅ 基础支持   | CLI 读 `~/.codebuddy/projects` 转写 JSONL；桌面版（CodeBuddy CN）正文在云端，索引本地会话元数据（标题线索/时间/项目/文件变更），详情可能为空 |
 | 通义灵码 (Lingma) | ✅ 基础支持   | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件                        |
 | Trae SOLO 桌面版  | ✅ 基础支持   | 读取`AppData/Roaming/TRAE SOLO CN`，加密库能力受限                  |
 | Copilot CLI       | ✅ 基础支持   | events.jsonl 多形状容错 + workspace.yaml 项目关联                    |
@@ -143,7 +143,7 @@ node src/cli.js search "连接池" --depth 3       # 搜索（depth 1=标题 2=�
 | `agentPaths`      | Agent 会话目录手动指定（路径存在即纳入扫描；设置页支持目录选择框）                                            | `{}` |
 | `accountMapping`  | 账号显示名与工作/个人分类映射                                                                                 | `{}` |
 | `searchHotkey`    | 搜索快捷键                                                                                                    | `/`  |
-| `manifestRepo`    | 远端适配器清单仓库 URL（声明式清单三源合并：用户目录 > 远端 > 内置；仅支持 http/https）                       | 空    |
+| `manifestRepo`    | 远端适配器清单仓库 URL（声明式清单三源合并：用户目录 > 远端 > 内置；仅支持 http/https；填官方清单仓库链接即可，见 [官方清单仓库](#官方清单仓库pr贡献在线更新适配器)） | 空    |
 | `manifestRefreshMinutes` | 远端清单刷新间隔（分钟）                                                                              | `60` |
 
 索引数据库位于 `~/.agentsessions/agentsessions.db`，删除即重建索引（原始会话文件不受任何影响——本工具只读不改）。
@@ -308,7 +308,18 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 
 1. **编写清单**：参考 [adapters/manifests/](adapters/manifests) 下的内置示例（`qwen-code.json` / `continue-dev.json` / `mimo-code.json` / `aider.json`），声明 agent id、检测规则、格式引擎与字段映射
 2. **本地验证**：放到 `~/.agentsessions/adapters/`（用户清单目录，优先级最高），`node src/cli.js detect` 确认识别 → 扫描验证
-3. **合入内置**：PR 提交到 `adapters/manifests/`；也可配置 `manifestRepo` 指向远端仓库动态分发（远端清单出于安全考虑不允许声明 external 引擎）
+3. **合入内置 / 在线分发**：PR 提交到 `adapters/manifests/`（随包内置，发版生效）；新工具适配也可直接 PR 到[官方清单仓库](#官方清单仓库pr贡献在线更新适配器)（合并即在线生效，无需等发版；远端清单出于安全考虑不允许声明 external 引擎）
+
+#### 官方清单仓库（PR 贡献，在线更新适配器）
+
+适配器清单集中维护在官方仓库[agentsessions-manifests](https://github.com/odayou/agentsessions-manifests)，所有使用者共享同一份在线清单，PR 合并即全量生效，无需重新发布客户端：
+
+- **使用者**：设置页「适配器清单（远端仓库）」填入官方链接即可（或配置 `manifestRepo` 字段）：
+  `https://raw.githubusercontent.com/odayou/agentsessions-manifests/main/agent-manifests.json`
+  刷新间隔由 `manifestRefreshMinutes` 控制（默认 60 分钟，拉取失败自动回退内置/缓存）
+- **贡献者**：fork 官方清单仓库 → 在 `agent-manifests.json` 的 `manifests` 数组中新增/修正清单条目 → 提交 PR；合并后所有用户在下一个刷新周期自动获得
+- **仓库维护者**：审阅并合并 PR；仓库种子文件即 [docs/manifest-repo/agent-manifests.json](docs/manifest-repo/agent-manifests.json)（顶层 `{"manifests": []}`）
+- 合并优先级：用户目录（`~/.agentsessions/adapters/`，本地试验/私有清单用）> 远端 > 内置，同名 id 高优先级覆盖
 
 ### 方式二：硬编码适配器
 
