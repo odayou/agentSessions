@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
-import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect, doScan, fetchCodebuddyStatus, codebuddyLogin, codebuddyLoginPoll } from '../api'
+import { fetchAccounts, fetchConfig, saveConfig, fetchStats, fetchDetect, doScan, fetchCodebuddyStatus, codebuddyLogin, codebuddyLoginPoll, codebuddyCliInstall } from '../api'
 import type { CodebuddyStatus } from '../api'
 import { eventToHotkey, formatHotkey } from '../hotkey'
 import { IS_TAURI, openExternal, REPO_URL, ISSUES_URL, getAppVersion } from '../lib'
@@ -60,6 +60,9 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
   const [cbErr, setCbErr] = useState('')
   const cbPollTimer = useRef<ReturnType<typeof setInterval> | null>(null)
   const cbDeadline = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // 云端组件下载：进行中每 1s 轮询 status 取进度
+  const [cliInstalling, setCliInstalling] = useState(false)
+  const cliTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const loadCbStatus = useCallback(() => {
     fetchCodebuddyStatus().then(setCbStatus).catch(() => {})
@@ -71,8 +74,40 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
     return () => {
       if (cbPollTimer.current) clearInterval(cbPollTimer.current)
       if (cbDeadline.current) clearTimeout(cbDeadline.current)
+      if (cliTimer.current) clearInterval(cliTimer.current)
     }
   }, [loadCbStatus])
+
+  const stopCliPolling = () => {
+    if (cliTimer.current) { clearInterval(cliTimer.current); cliTimer.current = null }
+    setCliInstalling(false)
+  }
+
+  // 云端组件按需下载：显式触发 → 1s 轮询进度 → done/error 收口；本地会话索引不受组件缺失影响
+  const onCliInstall = async () => {
+    setCbMsg(''); setCbErr('')
+    try {
+      await codebuddyCliInstall()
+      setCliInstalling(true)
+      if (cliTimer.current) clearInterval(cliTimer.current)
+      cliTimer.current = setInterval(async () => {
+        const fresh = await fetchCodebuddyStatus().catch(() => null)
+        if (!fresh) return
+        setCbStatus(fresh)
+        const st = fresh.cli?.install
+        if (st?.state === 'done') {
+          stopCliPolling()
+          setCbMsg(`云端组件 v${st.version || ''} 已就绪，点击「授权」完成登录`)
+        } else if (st?.state === 'error') {
+          stopCliPolling()
+          setCbErr('下载失败：' + (st.error || '未知原因') + '。可重试；国内网络建议挂代理后重试')
+        }
+      }, 1000)
+    } catch (e) {
+      setCliInstalling(false)
+      setCbErr('发起下载失败：' + (e as Error).message)
+    }
+  }
 
   const stopCbPolling = () => {
     if (cbPollTimer.current) { clearInterval(cbPollTimer.current); cbPollTimer.current = null }
@@ -342,6 +377,8 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
           <div className="scan-setting" style={{ flexWrap: 'wrap', gap: 10 }}>
             {!cbStatus ? (
               <span className="meta-tag agent-dim">状态加载中…</span>
+            ) : !cbStatus.cli?.installed ? (
+              <span className="meta-tag agent-dim">云端组件未安装 · 本地会话索引不受影响</span>
             ) : !cbStatus.installed ? (
               <span className="meta-tag" style={{ color: '#cf222e' }}>未授权</span>
             ) : cbStatus.stale ? (
@@ -353,11 +390,25 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
                 已授权{cbStatus.account?.nickname ? ' · ' + cbStatus.account.nickname : ''}
               </span>
             )}
-            {cbStatus?.version && <span className="meta-tag agent-dim">CLI v{cbStatus.version}</span>}
-            <button className="scan-btn mini-btn" disabled={cbBusy} onClick={onCodebuddyAuth}>
-              {cbBusy ? '等待授权…' : cbStatus?.installed && !cbStatus.stale ? '重新授权' : '授权'}
-            </button>
+            {cbStatus?.cli?.installed && cbStatus.version && <span className="meta-tag agent-dim">CLI v{cbStatus.version}</span>}
+            {cbStatus && !cbStatus.cli?.installed ? (
+              <button className="scan-btn mini-btn" disabled={cliInstalling} onClick={onCliInstall}>
+                {cliInstalling ? '下载中…' : '下载云端组件'}
+              </button>
+            ) : (
+              <button className="scan-btn mini-btn" disabled={cbBusy} onClick={onCodebuddyAuth}>
+                {cbBusy ? '等待授权…' : cbStatus?.installed && !cbStatus.stale ? '重新授权' : '授权'}
+              </button>
+            )}
           </div>
+          {cliInstalling && cbStatus?.cli?.install && (
+            <div className="hint" style={{ marginTop: 8 }}>
+              {({ downloading: '下载中', verifying: '校验中', extracting: '解压中' } as Record<string, string>)[cbStatus.cli.install.state] || '处理中'}
+              {cbStatus.cli.install.bytesTotal
+                ? ` ${Math.round((cbStatus.cli.install.bytesDone / cbStatus.cli.install.bytesTotal) * 100)}%（${(cbStatus.cli.install.bytesDone / 1048576).toFixed(1)} / ${(cbStatus.cli.install.bytesTotal / 1048576).toFixed(1)} MB）`
+                : '…'}
+            </div>
+          )}
           <div className="hint" style={{ marginTop: 8 }}>
             {cbStatus?.installed
               ? `凭据：${cbStatus.file}（仅存本机${cbStatus.expiresAt ? `，有效期至 ${new Date(cbStatus.expiresAt).toLocaleString('zh-CN')}` : ''}）`
@@ -388,7 +439,7 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
         <h3>适配器清单（远端仓库）</h3>
         <div className="stats-body scan-setting" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
           <div className="hint">
-            声明式适配器清单的三源合并优先级：本机用户目录 &gt; 远端仓库 &gt; 内置。填入 http/https 仓库 URL 后，
+            声明式适配器清单的三源合并优先级：本机用户目录 &gt; 远端仓库 &gt; 内置。填入 https 仓库 URL 后（仅支持 https），
             会定时拉取清单以接入新工具；拉取失败自动回退本地缓存。留空 = 关闭远端拉取。
           </div>
           <input

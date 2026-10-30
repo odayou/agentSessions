@@ -14,6 +14,8 @@ const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
 
+const CLI_PKG_SUBDIR = path.join('@tencent-ai', 'codebuddy-code')
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const safeParse = (t) => { try { return JSON.parse(t) } catch { return null } }
 // {data:{...}} 信封只剥一层；无信封原样返回（auth/status 等接口有/无信封两种形态都兼容）
@@ -22,11 +24,20 @@ function unwrap(j) {
 }
 
 // —— CLI 入口 ——
-// 打包布局：src/ 复制到 src-tauri/backend/src/，node_modules 在 backend/ 下 → ../node_modules 两端通用
-function resolveEntry() {
-  const pkg = path.join(__dirname, '..', 'node_modules', '@tencent-ai', 'codebuddy-code')
-  const entry = path.join(pkg, 'bin', 'codebuddy')
-  if (!fs.existsSync(entry)) return null
+// 两级查找：① 打包内置（dev 走仓库根 node_modules；桌面版走 backend/node_modules——
+// src/ 复制到 src-tauri/backend/src/，node_modules 在 backend/ 下，../node_modules 两端通用）
+// ② 用户目录按需下载（~/.agentsessions/cli/node_modules，由设置页「下载云端组件」经
+// src/cli-installer.js 安装；旧版安装包内置过 CLI，来源标记 bundled 便于区分）。
+// 路径与 cli-installer.js 的 cliRoot() 同构：AGENT_SESSIONS_CLI_DIR 可覆盖（测试隔离/自定义数据目录）
+function userCliRoot() {
+  const custom = process.env.AGENT_SESSIONS_CLI_DIR
+  const base = custom && path.isAbsolute(custom)
+    ? path.join(custom, 'cli')
+    : path.join(os.homedir(), '.agentsessions', 'cli')
+  return path.join(base, 'node_modules')
+}
+
+function readCliMeta(pkg) {
   let version = null
   let prefixPath = ''
   try {
@@ -39,7 +50,20 @@ function resolveEntry() {
     const pk = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8'))
     version = version || pk.version || null
   } catch { /* 忽略 */ }
-  return { pkg, entry, version, prefixPath }
+  return { version, prefixPath }
+}
+
+function resolveEntry() {
+  for (const { root, source } of [
+    { root: path.join(__dirname, '..', 'node_modules'), source: 'bundled' },
+    { root: userCliRoot(), source: 'user' },
+  ]) {
+    const pkg = path.join(root, CLI_PKG_SUBDIR)
+    const entry = path.join(pkg, 'bin', 'codebuddy')
+    if (!fs.existsSync(entry)) continue
+    return { pkg, entry, source, ...readCliMeta(pkg) }
+  }
+  return null
 }
 
 // —— HTTP 客户端（http/https 通用，Node 18 无原生 fetch 依赖顾虑） ——
@@ -111,7 +135,7 @@ function serveSpawn(nodeExe, entry, args) {
 // 起 serve 并等就绪；返回 {port, baseUrl, version, child, stderrTail, stop}
 async function serve(opts = {}) {
   const entry = resolveEntry()
-  if (!entry) throw new Error('CodeBuddy CLI 未集成（缺少 @tencent-ai/codebuddy-code），请重新安装')
+  if (!entry) throw new Error('CodeBuddy 云端组件未安装：本地会话索引不受影响，云端拉取请在设置页「CodeBuddy 云端授权」下载组件后重试')
   const host = opts.host || '127.0.0.1'
   const port = opts.port || (await findFreePort())
   const child = serveSpawn(process.execPath, entry.entry, `--serve --auth none --port ${port} --host ${host}`)
@@ -380,6 +404,7 @@ async function pollLogin(state, opts = {}) {
 
 module.exports = {
   resolveEntry,
+  userCliRoot,
   serve,
   api,
   killTree,

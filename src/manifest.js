@@ -6,7 +6,6 @@
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const http = require('node:http')
 const https = require('node:https')
 
 const BUILTIN_DIR = path.join(__dirname, '..', 'adapters', 'manifests')
@@ -152,12 +151,13 @@ function readDirManifests(dir) {
 
 // —— 远端清单仓库：非阻塞拉取（同步函数只读缓存，拉取异步回写缓存）——
 // 拉取失败/超时静默保留旧缓存（agentList §6.2：失败回退内置/缓存）
-// http/https 自适应 + 跟随 3xx 重定向（上限 3 跳）；仅 200 视为成功
+// https-only + 跟随 3xx 重定向（上限 3 跳）；仅 200 视为成功
 function httpGet(url, timeoutMs, redirects = 0) {
   return new Promise((resolve, reject) => {
     let u
     try { u = new URL(url) } catch { return reject(new Error('清单仓库 URL 非法')) }
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return reject(new Error('清单仓库仅支持 http/https'))
+    // 安全策略：清单仓库仅允许 https，防止明文链路被劫持替换清单内容（含 external RCE 面）
+    if (u.protocol !== 'https:') return reject(new Error('清单仓库仅支持 https'))
     const mod = u.protocol === 'https:' ? https : http
     const req = mod.get(u, { timeout: timeoutMs }, (res) => {
       const sc = res.statusCode || 0

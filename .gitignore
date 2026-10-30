@@ -46,3 +46,6 @@ docs/private/*
 docs/*
 
 .trae/*
+# ===== CLI 分发件构建产物（CI 上传 Release，本地不入库） =====
+dist-cli/
+.tmp-test-cli/
