@@ -14,6 +14,7 @@ const store = require('./src/store')
 const q = require('./src/query')
 const cbCli = require('./src/codebuddy-cli')
 const cbAdapter = require('./adapters/codebuddy')
+const cliInstaller = require('./src/cli-installer')
 
 const PORT = Number(process.env.AGENTSESSIONS_PORT) || 18778
 const DB_PATH = process.env.AGENTSESSIONS_DB || defaultDbPath()
@@ -222,15 +223,30 @@ async function handle(req, res) {
         }
         send(res, 200, { ok: true, config: config.loadConfig() })
         return
-      case '/api/codebuddy/status':
-        // 登录态（凭据文件级判断，秒回，不拉 serve）+ CLI 版本 + 最近一次云端拉取状态
+      case '/api/codebuddy/status': {
+        // 登录态（凭据文件级判断，秒回，不拉 serve）+ 云端组件状态（bundled/user/未装）+ 最近一次云端拉取状态
+        const entry = cbCli.resolveEntry()
         send(res, 200, {
           ok: true,
           ...cbCli.credentialState(),
-          version: (cbCli.resolveEntry() || {}).version || null,
+          version: (entry || {}).version || null,
           cloud: cbAdapter.getCloudState(),
+          cli: {
+            installed: !!entry,
+            source: entry ? entry.source : null,
+            version: entry ? entry.version : null,
+            install: cliInstaller.installState(),
+          },
         })
         return
+      }
+      case '/api/codebuddy/cli/install': {
+        // 按需下载云端组件（显式用户动作）；进度经 /api/codebuddy/status 的 cli.install 轮询
+        if (req.method !== 'POST') { send(res, 405, { ok: false, error: 'POST only' }); return }
+        const r = cliInstaller.startInstall()
+        send(res, r.ok ? 200 : 409, r)
+        return
+      }
       case '/api/codebuddy/login': {
         // 发起授权：创建授权会话，返回 authUrl（前端开浏览器）+ state（前端轮询凭据）
         if (req.method !== 'POST') { send(res, 405, { ok: false, error: 'POST only' }); return }

@@ -130,6 +130,17 @@ jobs:
       - name: Install backend dependencies
         run: npm ci
 
+      # CodeBuddy 云端组件按需下载的分发件：与安装包同版本发布，客户端设置页按需拉取
+      # （optional 原生依赖 npm install 时按平台过滤，故须在各平台 runner 上分别构建）
+      - name: Build CodeBuddy CLI package
+        run: node scripts/build-cli-pkg.js --out dist-cli
+
+      - name: Upload CLI package to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.resolve-version.outputs.tag }}
+        run: gh release upload "$TAG" dist-cli/codebuddy-cli-* --clobber
+
       - name: Install UI dependencies
         run: npm ci
         working-directory: ui

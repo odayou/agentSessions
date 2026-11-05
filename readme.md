@@ -1,12 +1,12 @@
 # AgentSessions
 
 本地优先的 AI 编码会话统一索引与检索工具。
+A local-first unified index and search tool for AI coding sessions.
+**全部数据留在本机，不上传、不联网。**（All data stays on your machine — nothing is uploaded, nothing goes online.）
 
 自动发现本机已安装的 coding agent（Claude Code、OpenCode、WorkBuddy、Trae、Gemini CLI、Cline、Cursor 等 19 种），把散落各处的会话记录统一索引到一起，按项目聚合、按账号区分，支持从标题到思考过程的分层全文搜索——让你随时找回"那个活是在哪个工具里干的、当时是怎么聊的"。
 
-A local-first unified index and search tool for AI coding sessions. It automatically discovers the coding agents installed on your machine (Claude Code, OpenCode, WorkBuddy, Trae, Gemini CLI, Cline, Cursor, and 14 more — 19 in total), indexes all your scattered session records in one place, groups them by project and account, and supports layered full-text search from titles down to thinking traces — so you can always find "which tool did that task, and how exactly did I discuss it back then".
-
-**全部数据留在本机，不上传、不联网。**（All data stays on your machine — nothing is uploaded, nothing goes online.）
+ It automatically discovers the coding agents installed on your machine (Claude Code, OpenCode, WorkBuddy, Trae, Gemini CLI, Cline, Cursor, and 14 more — 19 in total), indexes all your scattered session records in one place, groups them by project and account, and supports layered full-text search from titles down to thinking traces — so you can always find "which tool did that task, and how exactly did I discuss it back then".
 
 ---
 
@@ -66,7 +66,7 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 | Cline             | ✅ 完整支持   | `~/.cline/data/tasks/`（三端共用）+ 旧版 VS Code globalStorage 兜底 |
 | Roo Code          | ✅ 完整支持   | 与 Cline 共享任务解析，checkpoint git 目录自动跳过                   |
 | Codex CLI         | ✅ 基础支持   | 读取`~/.codex/sessions`，解析 rollout JSONL 格式                    |
-| CodeBuddy         | ✅ 完整支持   | CLI JSONL + serve 云端会话拉取（设置页一次授权，失效红点提醒）；桌面版消息正文明文本地可读，元数据兜底 |
+| CodeBuddy         | ✅ 完整支持   | CLI JSONL + serve 云端会话拉取（云端组件设置页按需下载，一次授权，失效红点提醒）；桌面版消息正文明文本地可读，元数据兜底 |
 | 通义灵码 (Lingma) | ✅ 基础支持   | 读取`~/.lingma`，尝试解析 JSONL 格式会话文件                        |
 | Trae SOLO 桌面版  | ✅ 基础支持   | 读取`AppData/Roaming/TRAE SOLO CN`，加密库能力受限                  |
 | Copilot CLI       | ✅ 基础支持   | events.jsonl 多形状容错 + workspace.yaml 项目关联                    |
@@ -87,14 +87,14 @@ A local-first unified index and search tool for AI coding sessions. It automatic
 
 ## 安装与运行（从源码）
 
-**环境要求**：Node.js **18 或 20**（Windows / macOS / Linux）。唯一原生依赖 better-sqlite3 v9.x 的预编译二进制只覆盖到 Node 20（ABI 115），用 Node 22/24 会报 `NODE_MODULE_VERSION` 错配——届时需升级 better-sqlite3 到 v11+ 或 `npm rebuild better-sqlite3` 本地源码编译（需 VS 构建工具）。
+**环境要求**：Node.js **≥ 18.20.8**（推荐 20.x；Windows / macOS / Linux）。下限来自 CodeBuddy CLI（`@tencent-ai/codebuddy-code`，云端授权与会话拉取依赖它）：源码模式下它由本机 Node 直接运行，最低要求 18.20.8，版本过低会导致授权/云端功能静默异常（桌面安装包用户无需关心——自带 node.exe，云端组件按需下载后也跑在自带 node 上）。上限方面，唯一原生依赖 better-sqlite3 v9.x 的预编译二进制只覆盖到 Node 20（ABI 115），用 Node 22/24 会报 `NODE_MODULE_VERSION` 错配——届时需升级 better-sqlite3 到 v11+ 或 `npm rebuild better-sqlite3` 本地源码编译（需 VS 构建工具）。即：**18.20.8 ≤ Node < 22**，推荐 20.x。
 
 **常见问题（切换 Node 版本后启动报错 / 扫描失败）**：本机升降级 Node 后，原生模块 ABI 与当前 Node 不匹配，两种典型报错：
 
 - `NODE_MODULE_VERSION xxx was compiled against a different Node.js version`：`node_modules` 是在其他 Node ABI 下安装的
 - `Could not locate the bindings file`：曾在不匹配的 Node 版本下执行过 `npm rebuild`，旧二进制被删除且源码编译未成功，包处于残缺状态
 
-修复相同——切回要求的版本（18 或 20），重装该包恢复与当前 ABI 匹配的预编译二进制：
+修复相同——切回要求的版本（≥ 18.20.8 的 18.x / 20.x），重装该包恢复与当前 ABI 匹配的预编译二进制：
 
 ```bash
 npm install better-sqlite3@^9.6.0
@@ -143,7 +143,7 @@ node src/cli.js search "连接池" --depth 3       # 搜索（depth 1=标题 2=�
 | `agentPaths`      | Agent 会话目录手动指定（路径存在即纳入扫描；设置页支持目录选择框）                                            | `{}` |
 | `accountMapping`  | 账号显示名与工作/个人分类映射                                                                                 | `{}` |
 | `searchHotkey`    | 搜索快捷键                                                                                                    | `/`  |
-| `manifestRepo`    | 远端适配器清单仓库 URL（声明式清单三源合并：用户目录 > 远端 > 内置；仅支持 http/https；填官方清单仓库链接即可，见 [官方清单仓库](#官方清单仓库pr贡献在线更新适配器)） | 空    |
+| `manifestRepo`    | 远端适配器清单仓库 URL（声明式清单三源合并：用户目录 > 远端 > 内置；仅支持 https；填官方清单仓库链接即可，见 [官方清单仓库](#官方清单仓库pr贡献在线更新适配器)） | 空    |
 | `manifestRefreshMinutes` | 远端清单刷新间隔（分钟）                                                                              | `60` |
 
 索引数据库位于 `~/.agentsessions/agentsessions.db`，删除即重建索引（原始会话文件不受任何影响——本工具只读不改）。
@@ -240,7 +240,7 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 | 检测不到某个 agent          | 确认安装路径在支持列表；自定义路径到设置页配置`agentPaths`                                  |
 | 某项目的会话没被索引        | 检查排除规则`excludes` 是否误命中；检查文件是否超过 `maxFileSizeMB`                       |
 | 搜索结果不全                | 渐进披露默认先搜浅层，点"继续搜索正文/思考"或用`depth` 参数搜深层                           |
-| 远端清单拉取失败            | 确认`manifestRepo` 为 http/https URL；桥进程控制台会输出失败原因；失败时自动回退内置/缓存清单 |
+| 远端清单拉取失败            | 确认`manifestRepo` 为 https URL；桥进程控制台会输出失败原因；失败时自动回退内置/缓存清单 |
 | 端口被占用                  | `AGENTSESSIONS_PORT` 换端口，或找到占用进程                                                 |
 | 数据乱了想重来              | 删除`~/.agentsessions/agentsessions.db` 重新扫描即可，原始会话文件无损                      |
 
@@ -254,7 +254,7 @@ $env:AGENTSESSIONS_DB="$env:TEMP\as-debug.db"; $env:AGENTSESSIONS_PORT="18999"; 
 
 - Rust（MSVC 工具链 `x86_64-pc-windows-msvc`——GNU 工具链链接 WebView2 会报 `export ordinal too large`，项目已在 `rust-toolchain.toml` 固定）
 - Windows 需要 WebView2 Runtime（Win11 自带）
-- 本地打包的 Node 版本须与安装依赖时一致：打包脚本会把当前 `node.exe` 与按其 ABI 编译的原生模块一起打进载荷，两者错配会导致安装包后端起不来（CI 已固定 Node 20，无此问题）
+- 本地打包的 Node 版本须与安装依赖时一致：打包脚本会把当前 `node.exe` 与按其 ABI 编译的原生模块一起打进载荷，两者错配会导致安装包后端起不来（CI 已固定 Node 20，无此问题）。CodeBuddy CLI 不再打进安装包（设置页按需下载），其在桌面版运行于自带 node.exe 上，与打包机 Node 版本无关
 
 ```bash
 cd ui && npm install && cd ..
@@ -277,7 +277,7 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 
 实测可用镜像（任选其一）：`gh-proxy.com` / `ghproxy.net` / `ghfast.top`。工具链会缓存到 `%LOCALAPPDATA%\tauri\`，首次下载成功后后续构建不再需要镜像。若走本地代理，也可改设 `HTTPS_PROXY`。
 
-**自包含后端**：桌面安装包内置完整后端，无需目标机器安装 Node——`beforeBuildCommand` 自动执行 [scripts/pack-backend.js](scripts/pack-backend.js)，把 `node.exe` + `server.js` + `src/` + `adapters/` + 运行时依赖（`better-sqlite3` 等，已裁剪 sqlite 源码）组装为 `src-tauri/backend/`（约 70MB，已 gitignore），由 `tauri.conf.json` 的 `resources` 打进安装包。桌面版启动时自动拉起该桥进程（`127.0.0.1:18778`），期间界面显示启动过渡屏（就绪即自动进入主界面），退出时自动回收进程；自带 node 也保证了 `better-sqlite3` 原生模块与运行时 ABI 严格一致。dev 模式（`tauri dev`）同样会自动拉起仓库根目录的 `server.js`。
+**自包含后端**：桌面安装包内置完整后端，无需目标机器安装 Node——`beforeBuildCommand` 自动执行 [scripts/pack-backend.js](scripts/pack-backend.js)，把 `node.exe` + `server.js` + `src/` + `adapters/` + 运行时依赖（`better-sqlite3` 等，已裁剪 sqlite 源码）组装为 `src-tauri/backend/`（约 110–130MB，大头是 node.exe，随平台与 Node 版本浮动，已 gitignore），由 `tauri.conf.json` 的 `resources` 打进安装包。CodeBuddy 云端组件**不在**安装包内：设置页显式触发按需下载（GitHub Release 分发件，附 sha256 校验与镜像回退），安装到 `~/.agentsessions/cli/`，本地会话索引不受影响。桌面版启动时自动拉起该桥进程（`127.0.0.1:18778`），期间界面显示启动过渡屏（就绪即自动进入主界面），退出时自动回收进程；自带 node 也保证了 `better-sqlite3` 原生模块与运行时 ABI 严格一致。dev 模式（`tauri dev`）同样会自动拉起仓库根目录的 `server.js`。
 
 ### CI 自动打包（GitHub Actions）
 

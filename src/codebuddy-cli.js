@@ -14,6 +14,8 @@ const net = require('node:net')
 const os = require('node:os')
 const path = require('node:path')
 
+const CLI_PKG_SUBDIR = path.join('@tencent-ai', 'codebuddy-code')
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const safeParse = (t) => { try { return JSON.parse(t) } catch { return null } }
 // {data:{...}} 信封只剥一层；无信封原样返回（auth/status 等接口有/无信封两种形态都兼容）
@@ -22,11 +24,20 @@ function unwrap(j) {
 }
 
 // —— CLI 入口 ——
-// 打包布局：src/ 复制到 src-tauri/backend/src/，node_modules 在 backend/ 下 → ../node_modules 两端通用
-function resolveEntry() {
-  const pkg = path.join(__dirname, '..', 'node_modules', '@tencent-ai', 'codebuddy-code')
-  const entry = path.join(pkg, 'bin', 'codebuddy')
-  if (!fs.existsSync(entry)) return null
+// 两级查找：① 打包内置（dev 走仓库根 node_modules；桌面版走 backend/node_modules——
+// src/ 复制到 src-tauri/backend/src/，node_modules 在 backend/ 下，../node_modules 两端通用）
+// ② 用户目录按需下载（~/.agentsessions/cli/node_modules，由设置页「下载云端组件」经
+// src/cli-installer.js 安装；旧版安装包内置过 CLI，来源标记 bundled 便于区分）。
+// 路径与 cli-installer.js 的 cliRoot() 同构：AGENT_SESSIONS_CLI_DIR 可覆盖（测试隔离/自定义数据目录）
+function userCliRoot() {
+  const custom = process.env.AGENT_SESSIONS_CLI_DIR
+  const base = custom && path.isAbsolute(custom)
+    ? path.join(custom, 'cli')
+    : path.join(os.homedir(), '.agentsessions', 'cli')
+  return path.join(base, 'node_modules')
+}
+
+function readCliMeta(pkg) {
   let version = null
   let prefixPath = ''
   try {
@@ -39,7 +50,20 @@ function resolveEntry() {
     const pk = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8'))
     version = version || pk.version || null
   } catch { /* 忽略 */ }
-  return { pkg, entry, version, prefixPath }
+  return { version, prefixPath }
+}
+
+function resolveEntry() {
+  for (const { root, source } of [
+    { root: path.join(__dirname, '..', 'node_modules'), source: 'bundled' },
+    { root: userCliRoot(), source: 'user' },
+  ]) {
+    const pkg = path.join(root, CLI_PKG_SUBDIR)
+    const entry = path.join(pkg, 'bin', 'codebuddy')
+    if (!fs.existsSync(entry)) continue
+    return { pkg, entry, source, ...readCliMeta(pkg) }
+  }
+  return null
 }
 
 // —— HTTP 客户端（http/https 通用，Node 18 无原生 fetch 依赖顾虑） ——
@@ -111,7 +135,7 @@ function serveSpawn(nodeExe, entry, args) {
 // 起 serve 并等就绪；返回 {port, baseUrl, version, child, stderrTail, stop}
 async function serve(opts = {}) {
   const entry = resolveEntry()
-  if (!entry) throw new Error('CodeBuddy CLI 未集成（缺少 @tencent-ai/codebuddy-code），请重新安装')
+  if (!entry) throw new Error('CodeBuddy 云端组件未安装：本地会话索引不受影响，云端拉取请在设置页「CodeBuddy 云端授权」下载组件后重试')
   const host = opts.host || '127.0.0.1'
   const port = opts.port || (await findFreePort())
   const child = serveSpawn(process.execPath, entry.entry, `--serve --auth none --port ${port} --host ${host}`)
@@ -156,9 +180,12 @@ async function api(handle, pathname, { method = 'GET', query, body, timeoutMs = 
   return unwrap(safeParse(r.text))
 }
 
-// —— 凭据文件（CLI 与桌面版共享，明文 JSON：{account, auth, accounts}） ——
-// Windows 实测 %LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\Tencent-Cloud.coding-copilot.info；
-// darwin/linux 沿用 VS Code 式 userData 目录名（跨平台目录名常量待实测，兜底扫描 coding-copilot*.info）
+// —— 凭据文件（CLI 与各桌面端共享，明文 JSON：{account, auth, accounts}） ——
+// 文件名为 <客户端产品名>.info，各客户端一份：实测 Windows
+// %LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\ 下既有 Tencent-Cloud.coding-copilot.info
+// （旧版 CLI），也有 workbuddy-desktop.info（WorkBuddy 桌面端，自动刷新 token）。
+// 因此不能写死单一文件名：读取时扫目录择优，写入时仍用旧版固定名（不碰其他客户端的文件）。
+// darwin/linux 沿用 VS Code 式 userData 目录名（跨平台目录名常量待实测）
 function credentialDir() {
   if (process.platform === 'win32') {
     return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'CodeBuddyExtension', 'Data', 'Public', 'auth')
@@ -173,30 +200,60 @@ function credentialPath() {
   return path.join(credentialDir(), 'Tencent-Cloud.coding-copilot.info')
 }
 
-// 读凭据：已知路径优先；未命中则扫同目录 coding-copilot*.info 兜底（basePath 受配置/环境影响的场景）
+// 读凭据：扫描凭据目录下所有 *.info（各客户端产品一份），解析出含 accessToken 的凭据择优：
+// 未过期优先（expiresAt 更晚者胜），过期文件按修改时间新者胜。目录不可读/无候选时回退旧版固定名。
 // 返回 {file, json} 或 null；从不把 token 带出（调用方只取 account/expiresAt 等元信息）
-function readCredential() {
-  let file = credentialPath()
-  if (!fs.existsSync(file)) {
-    try {
-      const dir = path.dirname(file)
-      if (fs.existsSync(dir)) {
-        const hit = fs.readdirSync(dir)
-          .filter((f) => f.endsWith('.info') && /coding-copilot/i.test(f))
-          .map((f) => { const p = path.join(dir, f); try { return { p, mtime: fs.statSync(p).mtimeMs } } catch { return null } })
-          .filter(Boolean)
-          .sort((a, b) => b.mtime - a.mtime)[0]
-        if (hit) file = hit.p
-      }
-    } catch { /* 目录不可读时忽略 */ }
-    if (!fs.existsSync(file)) return null
+function discoverCredentialFile() {
+  const legacy = credentialPath()
+  const dir = path.dirname(legacy)
+  const now = Date.now()
+  let best = null // {file, mtimeMs, expiresAt}
+  // 择优序：未过期 > 已过期；同组内 expiresAt 大者胜；再平按 mtime 新者胜
+  const betterThan = (a, b) => {
+    if (!b) return true
+    const av = a.expiresAt > now ? 1 : 0
+    const bv = b.expiresAt > now ? 1 : 0
+    if (av !== bv) return av > bv
+    if (a.expiresAt !== b.expiresAt) return a.expiresAt > b.expiresAt
+    return a.mtimeMs > b.mtimeMs
   }
+  try {
+    if (fs.existsSync(dir)) {
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith('.info')) continue
+        const p = path.join(dir, f)
+        let json
+        try { json = JSON.parse(fs.readFileSync(p, 'utf8')) } catch { continue }
+        const auth = json && typeof json === 'object' ? json.auth : null
+        if (!hasCredentialToken(auth)) continue
+        let mtimeMs = 0
+        try { mtimeMs = fs.statSync(p).mtimeMs } catch { /* 取不到 mtime 按 0 */ }
+        const cand = { file: p, mtimeMs, expiresAt: typeof auth.expiresAt === 'number' ? auth.expiresAt : 0 }
+        if (betterThan(cand, best)) best = cand
+      }
+    }
+  } catch { /* 目录不可读时走回退 */ }
+  return best ? best.file : legacy
+}
+
+function readCredential() {
+  const file = discoverCredentialFile()
+  if (!fs.existsSync(file)) return null
   try {
     const json = JSON.parse(fs.readFileSync(file, 'utf8'))
     if (!json || typeof json !== 'object' || !json.auth) return null
     return { file, json }
   } catch { return null }
 }
+
+// 展示字段净化：凭据里的 nickname/type 可能是客户端加密信封对象（实测 { $wbEncrypted: 1, envelope }），
+// 只把纯字符串带给上层，其余按未知处理
+const plainText = (v) => (typeof v === 'string' && v ? v : null)
+
+// accessToken 存在性：明文字符串（旧版 CLI / 本应用写入）或客户端加密信封对象（WorkBuddy 桌面端，
+// token 密文 + 明文 expiresAt）都算有凭据——这里只做登录态判断、从不带出 token 本体
+const hasCredentialToken = (auth) =>
+  !!auth && !!auth.accessToken && (typeof auth.accessToken === 'string' || typeof auth.accessToken === 'object')
 
 // 登录态（不依赖 serve，纯文件判断）：authenticated=有 accessToken 且未过期；
 // stale=refresh 也过期（彻底失效，须重新授权）。accounts 为账号档案注册表摘要（实测无 token，
@@ -207,17 +264,17 @@ function credentialState() {
   if (!c) return { installed: false, authenticated: false, stale: false, file: credentialPath(), account: null, accounts: [], expiresAt: null, refreshExpiresAt: null }
   const auth = c.json.auth || {}
   const now = Date.now()
-  const hasToken = typeof auth.accessToken === 'string' && auth.accessToken.length > 0
+  const hasToken = hasCredentialToken(auth)
   return {
     installed: true,
     file: c.file,
     authenticated: hasToken && typeof auth.expiresAt === 'number' && auth.expiresAt > now,
     stale: !hasToken || (typeof auth.refreshExpiresAt === 'number' && auth.refreshExpiresAt < now),
-    account: c.json.account ? { uid: c.json.account.uid, nickname: c.json.account.nickname, type: c.json.account.type } : null,
+    account: c.json.account ? { uid: c.json.account.uid, nickname: plainText(c.json.account.nickname), type: plainText(c.json.account.type) } : null,
     accounts: Array.isArray(c.json.accounts)
       ? c.json.accounts
         .filter((a) => a && typeof a.uid === 'string' && a.uid)
-        .map((a) => ({ uid: a.uid, nickname: a.nickname, type: a.type, lastLogin: !!a.lastLogin }))
+        .map((a) => ({ uid: a.uid, nickname: plainText(a.nickname), type: plainText(a.type), lastLogin: !!a.lastLogin }))
       : [],
     expiresAt: typeof auth.expiresAt === 'number' ? auth.expiresAt : null,
     refreshExpiresAt: typeof auth.refreshExpiresAt === 'number' ? auth.refreshExpiresAt : null,
@@ -293,9 +350,10 @@ function mergeCredential(existing, incoming) {
   return { ...incoming, accounts: [...byUid.values()] }
 }
 
-// 读凭据原始 JSON（合并用：不要求 auth 存在，只取 accounts 注册表）
+// 读凭据原始 JSON（合并用：不要求 auth 存在，只取 accounts 注册表；读当前择优文件，
+// 使重登时能合并到其他客户端文件里的账号档案）
 function readCredentialRaw() {
-  const file = credentialPath()
+  const file = discoverCredentialFile()
   try {
     if (!fs.existsSync(file)) return null
     const j = JSON.parse(fs.readFileSync(file, 'utf8'))
@@ -323,7 +381,7 @@ async function checkLogin(state) {
     if (auth && auth.accessToken) {
       const cred = mergeCredential(readCredentialRaw(), buildCredential(data))
       const file = writeCredentialFile(cred)
-      return { done: true, file, account: cred.account ? { uid: cred.account.uid, nickname: cred.account.nickname, type: cred.account.type } : null, accountCount: cred.accounts.length }
+      return { done: true, file, account: cred.account ? { uid: cred.account.uid, nickname: plainText(cred.account.nickname), type: plainText(cred.account.type) } : null, accountCount: cred.accounts.length }
     }
   }
   return { pending: true } // pending 时网关返回 200 + {code:11217, msg:"login ing..."}
@@ -346,10 +404,12 @@ async function pollLogin(state, opts = {}) {
 
 module.exports = {
   resolveEntry,
+  userCliRoot,
   serve,
   api,
   killTree,
   credentialPath,
+  discoverCredentialFile,
   readCredential,
   credentialState,
   authStatus,

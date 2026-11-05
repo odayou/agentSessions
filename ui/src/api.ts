@@ -142,6 +142,20 @@ export interface CodebuddyAccountBrief {
   lastLogin?: boolean
 }
 
+// 云端组件（CodeBuddy CLI）状态：未安装时设置页提供显式下载，本地会话索引不受影响
+export interface CodebuddyCliInfo {
+  installed: boolean
+  source: 'bundled' | 'user' | null
+  version: string | null
+  install: {
+    state: 'idle' | 'downloading' | 'verifying' | 'extracting' | 'done' | 'error' | 'installed'
+    version: string | null
+    bytesDone: number
+    bytesTotal: number
+    error: string | null
+  }
+}
+
 export interface CodebuddyStatus {
   ok: boolean
   installed: boolean
@@ -154,10 +168,18 @@ export interface CodebuddyStatus {
   file: string
   version: string | null
   cloud: { ok: boolean | null; reason: string | null; checkedAt: number | null; total: number; pulled: number }
+  cli?: CodebuddyCliInfo
 }
 
 export function fetchCodebuddyStatus() {
   return get<CodebuddyStatus>('/codebuddy/status')
+}
+
+// 发起云端组件按需下载（显式用户动作）；进度经 fetchCodebuddyStatus 的 cli.install 轮询
+export async function codebuddyCliInstall() {
+  const r = await fetch(`${BASE}/codebuddy/cli/install`, { method: 'POST' })
+  const d = await r.json()
+  if (!r.ok || !d.ok) throw new Error(d.error || 'install failed')
 }
 
 // 发起授权：返回 authUrl（前端开浏览器）+ state（前端轮询）
