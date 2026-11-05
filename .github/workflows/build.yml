@@ -135,11 +135,34 @@ jobs:
       - name: Build CodeBuddy CLI package
         run: node scripts/build-cli-pkg.js --out dist-cli
 
+      # 直接用 create-release 的 release_id 上传，避免按 tag 解析 draft release
+      # （releases/tags/<tag> 对 draft 恒 404，gh 只能靠 GraphQL 兜底，跨平台不稳定）
       - name: Upload CLI package to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.resolve-version.outputs.tag }}
-        run: gh release upload "$TAG" dist-cli/codebuddy-cli-* --clobber
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(dist-cli/codebuddy-cli-*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::dist-cli 下没有任何 codebuddy-cli-* 产物，跳过后会导致客户端无法按需下载 CLI"
+            echo "dist-cli 当前内容："
+            ls -la dist-cli 2>/dev/null || echo "(dist-cli 目录不存在)"
+            exit 1
+          fi
+          echo "待上传产物："
+          printf '  %s\n' "${files[@]}"
+          for f in "${files[@]}"; do
+            name=$(basename "$f")
+            old=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+                    -q ".[] | select(.name==\"$name\") | .id" || true)
+            if [ -n "$old" ]; then
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+            fi
+            gh api -X POST "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name" \
+              -H "Content-Type: application/octet-stream" --input "$f"
+          done
 
       - name: Install UI dependencies
         run: npm ci
