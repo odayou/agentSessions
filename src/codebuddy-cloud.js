@@ -1,7 +1,8 @@
 'use strict'
 // CodeBuddy 桌面版（IDE）会话正文读取（阶段 2）。
 // 侦察修正（2026-10-20）：桌面版新版把会话消息明文落本地，无需 state.vscdb/DPAPI 与云端 API 逆向——
-//   %LOCALAPPDATA%\CodeBuddyExtension\Data\<uid>\CodeBuddyIDE\<uid>\history\<md5(win 反斜杠 cwd)>\<convId>\messages\<msgId>.json
+//   %LOCALAPPDATA%\CodeBuddyExtension\Data\<uid>\<客户端变体>\<uid>\history\<md5(win 反斜杠 cwd)>\<convId>\messages\<msgId>.json
+//   客户端变体：CodeBuddyIDE（桌面版）/ VSCode（VS Code 扩展）/ JetBrains（IDEA、PyCharm 插件），目录结构一致
 //   消息文件：{role:'user'|'assistant'|'tool', message:'<JSON 串>', id, references?, extra:'<JSON 串>', createdAt:ISO}
 //   message.content 块类型：user:text / assistant:reasoning|text|tool-call{toolCallId,toolName,args} / tool:tool-result
 //   history\<hash>\index.json：{conversations:[{id,type,name,createdAt,lastMessageAt}],current}；hash=md5(反斜杠 cwd)
@@ -13,23 +14,32 @@ const path = require('node:path')
 const os = require('node:os')
 const { classifyPurpose } = require('./purpose')
 
-// 多账号枚举：Data/<uid>/CodeBuddyIDE/<uid>/history（uid 取自目录结构，不依赖登录态——凭据过期正文照样可读）
+// 多账号 + 多客户端变体枚举：Data/<uid>/<客户端变体>/<uid>/history
+// 实测变体有 CodeBuddyIDE（桌面版）、VSCode（VS Code 扩展）、JetBrains（IDEA/PyCharm 插件）；
+// 统一按目录结构识别，未知变体只要存在 history 也一并纳入（uid 取自目录结构，不依赖登录态——凭据过期正文照样可读）
 function desktopHistoryRoots() {
   const out = []
   try {
-    const dataDir = path.join(os.homedir(), 'AppData', 'Local', 'CodeBuddyExtension', 'Data')
+    const localAppData = process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local')
+    const dataDir = path.join(localAppData, 'CodeBuddyExtension', 'Data')
     if (!fs.existsSync(dataDir)) return out
     for (const uid of fs.readdirSync(dataDir)) {
-      const h = path.join(dataDir, uid, 'CodeBuddyIDE', uid, 'history')
-      try { if (fs.statSync(h).isDirectory()) out.push(h) } catch { /* 跳过非目录/无权限 */ }
+      let variants = []
+      try { variants = fs.readdirSync(path.join(dataDir, uid)) } catch { continue }
+      for (const variant of variants) {
+        const h = path.join(dataDir, uid, variant, uid, 'history')
+        try { if (fs.statSync(h).isDirectory()) out.push(h) } catch { /* 跳过非目录/无权限 */ }
+      }
     }
   } catch { /* 桌面版未安装时静默 */ }
   return out
 }
 
 // 会话清单：[{convId, msgDir, name, type, createdAt, lastMessageAt, hasMessages}]
+// 同一会话可能同时存在于多个客户端变体（实测桌面版与 JetBrains 共用 conversationId），
+// 按消息文件数保留最完整的一份，避免同一会话被重复索引/以较少消息的副本覆盖。
 function listConversations() {
-  const out = []
+  const chosen = new Map()
   for (const root of desktopHistoryRoots()) {
     for (const hash of safeReaddir(root)) {
       const hd = path.join(root, hash)
@@ -39,21 +49,25 @@ function listConversations() {
       for (const c of convs) {
         if (!c || typeof c.id !== 'string') continue
         const msgDir = path.join(hd, c.id, 'messages')
-        let hasMessages = false
-        try { hasMessages = fs.statSync(msgDir).isDirectory() && fs.readdirSync(msgDir).some((f) => f.endsWith('.json')) } catch { /* 无消息目录 */ }
-        out.push({
+        let msgFiles = 0
+        try {
+          if (fs.statSync(msgDir).isDirectory()) msgFiles = fs.readdirSync(msgDir).filter((f) => f.endsWith('.json')).length
+        } catch { /* 无消息目录 */ }
+        const entry = {
           convId: c.id,
           msgDir,
           name: typeof c.name === 'string' ? c.name : '',
           type: c.type || null,
           createdAt: parseIso(c.createdAt),
           lastMessageAt: parseIso(c.lastMessageAt),
-          hasMessages,
-        })
+          hasMessages: msgFiles > 0,
+        }
+        const prev = chosen.get(c.id)
+        if (!prev || msgFiles > prev.msgFiles) chosen.set(c.id, { entry, msgFiles })
       }
     }
   }
-  return out
+  return [...chosen.values()].map((x) => x.entry)
 }
 
 function safeReaddir(dir) {

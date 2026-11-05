@@ -10,15 +10,41 @@
 const fs = require('node:fs')
 const path = require('node:path')
 const os = require('node:os')
+const crypto = require('node:crypto')
 const { classifyPurpose } = require('../src/purpose')
 const { findJsonlFiles, buildSubjects } = require('./lib')
 const cli = require('../src/codebuddy-cli')
 const cloud = require('../src/codebuddy-cloud')
 
 const PROJECTS_DIR = path.join(os.homedir(), '.codebuddy', 'projects')
-const DESKTOP_DIR = process.env.APPDATA
-  ? path.join(process.env.APPDATA, 'CodeBuddy CN', 'User', 'globalStorage', 'tencent-cloud.coding-copilot')
-  : path.join(os.homedir(), 'AppData', 'Roaming', 'CodeBuddy CN', 'User', 'globalStorage', 'tencent-cloud.coding-copilot')
+// 桌面版元数据根：CodeBuddy CN 桌面版 + VS Code 扩展（均在 User/globalStorage 下）
+const DESKTOP_DIRS = [
+  process.env.APPDATA
+    ? path.join(process.env.APPDATA, 'CodeBuddy CN', 'User', 'globalStorage', 'tencent-cloud.coding-copilot')
+    : path.join(os.homedir(), 'AppData', 'Roaming', 'CodeBuddy CN', 'User', 'globalStorage', 'tencent-cloud.coding-copilot'),
+  process.env.APPDATA
+    ? path.join(process.env.APPDATA, 'Code', 'User', 'globalStorage', 'tencent-cloud.coding-copilot')
+    : path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'tencent-cloud.coding-copilot'),
+]
+
+// JetBrains 插件元数据根（Roaming/JetBrains/<IDE>/FusionCompat/globalStorage/Tencent-Cloud.coding-copilot）：
+// 仅用于 conversationId / 项目 hash → cwd 反查（JetBrains 的本地正文目录不含 cwd），
+// 不作为会话元数据源，避免凭空多出无正文空壳会话。
+let cwdDirsCache = null
+function cwdDirs() {
+  if (cwdDirsCache) return cwdDirsCache
+  cwdDirsCache = DESKTOP_DIRS.slice()
+  try {
+    const base = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'JetBrains')
+    for (const ide of fs.readdirSync(base)) {
+      for (const pid of ['Tencent-Cloud.coding-copilot', 'tencent-cloud.coding-copilot']) {
+        const p = path.join(base, ide, 'FusionCompat', 'globalStorage', pid)
+        try { if (fs.statSync(p).isDirectory()) cwdDirsCache.push(p) } catch { /* 跳过非目录 */ }
+      }
+    }
+  } catch { /* 未安装 JetBrains 插件 */ }
+  return cwdDirsCache
+}
 
 // 解析时间戳
 function parseTs(v) {
@@ -28,6 +54,10 @@ function parseTs(v) {
     if (!Number.isNaN(n)) return n
   }
   return null
+}
+
+function md5(s) {
+  return crypto.createHash('md5').update(s).digest('hex')
 }
 
 // —— 桌面版：base64 目录名 → 项目路径 ——
@@ -67,59 +97,99 @@ let queueCache = null
 function queueMessages() {
   if (queueCache) return queueCache
   queueCache = new Map()
-  try {
-    const dir = path.join(DESKTOP_DIR, 'message-queue')
-    if (fs.existsSync(dir)) {
-      for (const f of fs.readdirSync(dir)) {
-        if (!f.endsWith('.json')) continue
-        let j
-        try { j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { continue }
-        const convs = j && j.conversations
-        if (!convs || typeof convs !== 'object') continue
-        for (const cid of Object.keys(convs)) {
-          const items = Array.isArray(convs[cid] && convs[cid].items) ? convs[cid].items : []
-          for (const it of items) {
-            const text = (Array.isArray(it && it.contentBlocks) ? it.contentBlocks : [])
-              .map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? b.text : ''))
-              .filter(Boolean).join('\n').trim()
-            if (text && !queueCache.has(cid)) queueCache.set(cid, { text, updatedAt: convs[cid].updatedAt || null })
+  for (const root of DESKTOP_DIRS) {
+    try {
+      const dir = path.join(root, 'message-queue')
+      if (fs.existsSync(dir)) {
+        for (const f of fs.readdirSync(dir)) {
+          if (!f.endsWith('.json')) continue
+          let j
+          try { j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) } catch { continue }
+          const convs = j && j.conversations
+          if (!convs || typeof convs !== 'object') continue
+          for (const cid of Object.keys(convs)) {
+            const items = Array.isArray(convs[cid] && convs[cid].items) ? convs[cid].items : []
+            for (const it of items) {
+              const text = (Array.isArray(it && it.contentBlocks) ? it.contentBlocks : [])
+                .map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? b.text : ''))
+                .filter(Boolean).join('\n').trim()
+              if (text && !queueCache.has(cid)) queueCache.set(cid, { text, updatedAt: convs[cid].updatedAt || null })
+            }
           }
         }
       }
-    }
-  } catch { /* 队列不可读时忽略 */ }
+    } catch { /* 队列不可读时忽略 */ }
+  }
   return queueCache
 }
 
-// —— 桌面版：conversationId → {b64, cwd}（edit-sessions 入口反查项目，进程内缓存一次） ——
+// —— 桌面版：conversationId → {b64, cwd, root}（metadata 入口反查项目，进程内缓存一次） ——
 let cwdMapCache = null
 function convCwdMap() {
   if (cwdMapCache) return cwdMapCache
   cwdMapCache = new Map()
-  try {
-    const gh = path.join(DESKTOP_DIR, 'genie-history')
-    if (fs.existsSync(gh)) {
-      for (const b64 of fs.readdirSync(gh)) {
-        const cwd = decodeCwd(b64)
-        const convDir = path.join(gh, b64, 'conversations')
-        if (!cwd || !fs.existsSync(convDir)) continue
-        for (const conv of fs.readdirSync(convDir)) {
-          if (!cwdMapCache.has(conv)) cwdMapCache.set(conv, { b64, cwd })
+  for (const root of cwdDirs()) {
+    try {
+      const gh = path.join(root, 'genie-history')
+      if (fs.existsSync(gh)) {
+        for (const b64 of fs.readdirSync(gh)) {
+          const cwd = decodeCwd(b64)
+          const convDir = path.join(gh, b64, 'conversations')
+          if (!cwd || !fs.existsSync(convDir)) continue
+          for (const conv of fs.readdirSync(convDir)) {
+            if (!cwdMapCache.has(conv)) cwdMapCache.set(conv, { b64, cwd, root })
+          }
         }
       }
-    }
-  } catch { /* 忽略 */ }
+    } catch { /* 忽略单个根不可读 */ }
+  }
   return cwdMapCache
+}
+
+// —— 桌面版：项目 hash 目录名 → cwd（conv 元数据缺失时的兜底；hash=md5(cwd)） ——
+// 反斜杠/正斜杠两种写法都登记（实测正文目录用反斜杠 md5，元数据 b64 解码出的是正斜杠形式）
+let hashCwdCache = null
+function hashCwdMap() {
+  if (hashCwdCache) return hashCwdCache
+  hashCwdCache = new Map()
+  for (const root of cwdDirs()) {
+    try {
+      const gh = path.join(root, 'genie-history')
+      if (!fs.existsSync(gh)) continue
+      for (const b64 of fs.readdirSync(gh)) {
+        const cwd = decodeCwd(b64)
+        if (!cwd) continue
+        const fwd = cwd.replace(/\\/g, '/')
+        const back = fwd.split('/').join('\\')
+        hashCwdCache.set(md5(fwd), cwd)
+        hashCwdCache.set(md5(back), cwd)
+      }
+    } catch { /* 忽略单个根不可读 */ }
+  }
+  return hashCwdCache
+}
+
+// 源文件所属的元数据根（genie-history / edit-sessions 文件路径均带根前缀）
+function desktopRootOf(file) {
+  const norm = String(file).replace(/\\/g, '/')
+  for (const root of DESKTOP_DIRS) {
+    if (norm.startsWith(String(root).replace(/\\/g, '/') + '/')) return root
+  }
+  return null
 }
 
 // —— 桌面版：聚合单个会话的本地元数据（conversations 目录 / edit-sessions 两路触发，产出一致 → 幂等覆盖） ——
 function resolveDesktop(convId, b64, triggerFile) {
   if (!convId || !/^[0-9a-f]{16,}$/i.test(convId)) return null
-  const gh = path.join(DESKTOP_DIR, 'genie-history')
-  const hit = b64 ? { b64, cwd: decodeCwd(b64) } : convCwdMap().get(convId)
+  const mapped = b64 ? null : convCwdMap().get(convId)
+  const root = desktopRootOf(triggerFile) || (mapped && mapped.root)
+    || (b64 && DESKTOP_DIRS.find((r) => fs.existsSync(path.join(r, 'genie-history', b64))))
+    || DESKTOP_DIRS[0]
+  const gh = path.join(root, 'genie-history')
+  const hit = b64 ? { b64, cwd: decodeCwd(b64) } : mapped
   if (!hit || !hit.cwd) return null
   const convDir = path.join(gh, hit.b64, 'conversations', convId)
-  const esFile = path.join(DESKTOP_DIR, 'edit-sessions', convId + '.json')
+  const esFile = path.join(root, 'edit-sessions', convId + '.json')
 
   let createdAt = null
   let updatedAt = null
@@ -227,22 +297,26 @@ function sources(sourceDir) {
     for (const c of cloud.listConversations()) {
       if (c.hasMessages) { fullConvs.add(c.convId); out.push(c.msgDir) }
     }
-    const gh = path.join(DESKTOP_DIR, 'genie-history')
-    if (fs.existsSync(gh)) {
-      for (const b64 of fs.readdirSync(gh)) {
-        const convDir = path.join(gh, b64, 'conversations')
-        if (!fs.existsSync(convDir)) continue
-        for (const conv of fs.readdirSync(convDir)) {
-          if (fullConvs.has(conv)) continue // 正文通道接管
-          const p = path.join(convDir, conv)
-          try { if (fs.statSync(p).isDirectory()) out.push(p) } catch { /* 跳过 */ }
+    // 元数据根逐个遍历（CodeBuddy CN 桌面版 / VS Code 扩展）；fullConvs 跨根构建，
+    // 任一客户端已有正文的会话都不再用元数据空壳重复产出
+    for (const root of DESKTOP_DIRS) {
+      const gh = path.join(root, 'genie-history')
+      if (fs.existsSync(gh)) {
+        for (const b64 of fs.readdirSync(gh)) {
+          const convDir = path.join(gh, b64, 'conversations')
+          if (!fs.existsSync(convDir)) continue
+          for (const conv of fs.readdirSync(convDir)) {
+            if (fullConvs.has(conv)) continue // 正文通道接管
+            const p = path.join(convDir, conv)
+            try { if (fs.statSync(p).isDirectory()) out.push(p) } catch { /* 跳过 */ }
+          }
         }
       }
-    }
-    const es = path.join(DESKTOP_DIR, 'edit-sessions')
-    if (fs.existsSync(es)) {
-      for (const f of fs.readdirSync(es)) {
-        if (f.endsWith('.json') && !fullConvs.has(f.slice(0, -5))) out.push(path.join(es, f))
+      const es = path.join(root, 'edit-sessions')
+      if (fs.existsSync(es)) {
+        for (const f of fs.readdirSync(es)) {
+          if (f.endsWith('.json') && !fullConvs.has(f.slice(0, -5))) out.push(path.join(es, f))
+        }
       }
     }
   } catch { /* 桌面版数据缺失/不可读时忽略 */ }
@@ -252,7 +326,9 @@ function sources(sourceDir) {
 // 解析单个源文件：按路径特征分流 CLI 转写 / 桌面版会话 / 桌面版本地消息正文
 function parseFile(file) {
   const norm = String(file).replace(/\\/g, '/')
-  if (norm.includes('/CodeBuddyExtension/Data/') && norm.includes('/CodeBuddyIDE/') && norm.endsWith('/messages')) {
+  // 本地正文目录：…/CodeBuddyExtension/Data/<uid>/<客户端变体>/<uid>/history/<hash>/<convId>/messages
+  // 客户端变体（CodeBuddyIDE / VSCode / JetBrains）结构一致，不再限定 CodeBuddyIDE
+  if (norm.includes('/CodeBuddyExtension/Data/') && norm.endsWith('/messages')) {
     return parseDesktopMessages(file)
   }
   if (norm.includes('/genie-history/') && norm.includes('/conversations/')) {
@@ -269,10 +345,13 @@ function parseDesktopMessages(file) {
   const convDir = path.dirname(file)
   const hashDir = path.dirname(convDir)
   const convId = path.basename(convDir)
+  // cwd 归属：会话元数据（genie-history）优先，缺失时用项目 hash 目录名反查（md5(cwd)）
   const hit = convCwdMap().get(convId)
+  const cwd = hit && hit.cwd ? hit.cwd : hashCwdMap().get(path.basename(hashDir))
+  if (!cwd) return null
   const conv = cloud.convMetaOf(hashDir, convId)
-  if (!conv || !hit || !hit.cwd) return null
-  const item = cloud.buildSessionItem(conv, hit.cwd, sandboxRootOf)
+  if (!conv) return null
+  const item = cloud.buildSessionItem(conv, cwd, sandboxRootOf)
   if (item) item.subjects = buildSubjects(item.turns)
   return item
 }

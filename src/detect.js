@@ -85,8 +85,12 @@ const AGENTS = {
   },
   codebuddy: {
     label: 'CodeBuddy',
-    // CLI 配置（~/.codebuddy）或桌面版（Roaming\CodeBuddy CN）；基础适配器
-    detect: () => hasDir('.codebuddy') || hasDir('AppData/Roaming/CodeBuddy CN') || inPath('codebuddy'),
+    // CLI 配置（~/.codebuddy）、桌面版（Roaming\CodeBuddy CN）、
+    // VS Code 扩展（Code\User\globalStorage\tencent-cloud.coding-copilot）或插件本地正文（Local\CodeBuddyExtension）
+    detect: () => hasDir('.codebuddy') || hasDir('AppData/Roaming/CodeBuddy CN')
+      || hasDir('AppData/Local/CodeBuddyExtension')
+      || fs.existsSync(path.join(globalStorageDir('Code'), 'tencent-cloud.coding-copilot'))
+      || inPath('codebuddy'),
   },
   lingma: {
     label: 'Lingma',
