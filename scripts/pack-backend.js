@@ -60,6 +60,9 @@ function main() {
   fs.copyFileSync(path.join(ROOT, 'package.json'), path.join(OUT, 'package.json'))
   copyDir(path.join(ROOT, 'src'), path.join(OUT, 'src'))
   copyDir(path.join(ROOT, 'adapters'), path.join(OUT, 'adapters'))
+  // src/cli-installer.js 依赖 ../scripts/cli-pkg，二者随载荷一起分发
+  fs.mkdirSync(path.join(OUT, 'scripts'), { recursive: true })
+  fs.copyFileSync(path.join(ROOT, 'scripts', 'cli-pkg.js'), path.join(OUT, 'scripts', 'cli-pkg.js'))
 
   // 2. 运行时依赖（better-sqlite3 裁剪，bindings/file-uri-to-path 原样）
   //    CodeBuddy 云端组件不在此列：改按需下载（见文件头注释与 src/cli-installer.js）
@@ -80,6 +83,11 @@ function main() {
   const native = path.join(outNm, 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node')
   if (!fs.existsSync(native)) {
     console.error('[pack-backend] 缺少 better_sqlite3.node，请先在根目录 npm install')
+    process.exit(1)
+  }
+  const cliPkg = path.join(OUT, 'scripts', 'cli-pkg.js')
+  if (!fs.existsSync(cliPkg)) {
+    console.error('[pack-backend] 缺少 scripts/cli-pkg.js（src/cli-installer.js 运行时依赖）')
     process.exit(1)
   }
 
