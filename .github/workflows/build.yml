@@ -70,8 +70,8 @@ jobs:
                 core.info('Existing release is draft, reusing it');
                 releaseId = existing.id;
               } else {
-                core.setFailed(`Release for tag ${tagName} already published. Delete it first or use a new version.`);
-                return;
+                core.warning(`Release for tag ${tagName} already published (id=${existing.id}), reusing it`);
+                releaseId = existing.id;
               }
             } catch (err) {
               if (err.status === 404) {
@@ -143,6 +143,12 @@ jobs:
           RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
         shell: bash
         run: |
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::release_id 为空（create-release 未产出 id），无法确定上传目标"
+            exit 1
+          fi
+          # 资产上传端点只在 uploads.github.com，取 release 自带的 upload_url 并去掉 {?name,label}
+          upload_url=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -q .upload_url | cut -d'{' -f1)
           shopt -s nullglob
           files=(dist-cli/codebuddy-cli-*)
           if [ ${#files[@]} -eq 0 ]; then
@@ -160,8 +166,11 @@ jobs:
             if [ -n "$old" ]; then
               gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
             fi
-            gh api -X POST "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?name=$name" \
-              -H "Content-Type: application/octet-stream" --input "$f"
+            curl -fsS -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/octet-stream" \
+              --data-binary @"$f" \
+              "$upload_url?name=$name"
           done
 
       - name: Install UI dependencies
