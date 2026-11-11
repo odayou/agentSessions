@@ -1,6 +1,6 @@
 // 前端共享工具：时间格式化 + 关键词高亮（列表卡片与详情视图共用）。
 import React from 'react'
-import { openUrl } from '@tauri-apps/plugin-opener'
+import { openUrl, openPath, revealItemInDir } from '@tauri-apps/plugin-opener'
 
 // 是否运行在 Tauri 桌面壳内（浏览器 dev 模式为 false，沿用浏览器自带 DevTools）
 export const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -10,6 +10,11 @@ export const IS_TAURI = typeof window !== 'undefined' && '__TAURI_INTERNALS__' i
 export function openExternal(url: string): void {
   if (IS_TAURI) openUrl(url).catch((e) => console.error('打开外链失败：', e))
   else window.open(url)
+}
+
+// 在系统文件管理器中打开会话来源：文件定位并选中，目录直接打开；仅桌面壳内调用
+export function openSourceInFileManager(path: string, kind: 'file' | 'dir'): Promise<void> {
+  return kind === 'dir' ? openPath(path) : revealItemInDir(path)
 }
 
 // 全局兜底：markdown 渲染出的 <a target="_blank"> 在桌面壳内点了没反应，

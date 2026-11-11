@@ -160,6 +160,15 @@ async function handle(req, res) {
         send(res, 200, { ok: true, session: d })
         return
       }
+      case '/api/session/changes': {
+        // 详情打开期间的低频变化检查：只 stat 来源路径取指纹，不解析内容
+        const id = qs.id
+        if (!id) { send(res, 400, { ok: false, error: 'missing id' }); return }
+        const st = q.sessionSourceState(DB_PATH, id)
+        if (!st) { send(res, 404, { ok: false, error: 'not found' }); return }
+        send(res, 200, { ok: true, session: st })
+        return
+      }
       case '/api/export': {
         const id = qs.id
         if (!id) { send(res, 400, { ok: false, error: 'missing id' }); return }

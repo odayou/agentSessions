@@ -44,15 +44,21 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 
 .body { flex: 1; overflow: hidden; display: flex; }
 
-/* 双栏布局：左列表 + 右详情（详情打开时可收起左栏） */
+/* 双栏布局：左列表 + 右详情（详情打开时可收起左栏；分隔条可拖动调整比例） */
 .main-col { flex: 1; min-width: 0; overflow: hidden; height: 100%; }
 .main-col.collapsed { display: none; }
 .collapse-left {
   width: 18px; border: none; border-left: 1px solid var(--border); background: var(--panel);
-  cursor: pointer; color: var(--muted); font-size: 12px; flex: none;
+  cursor: col-resize; color: var(--muted); font-size: 12px; flex: none; touch-action: none;
 }
 .collapse-left:hover { background: var(--bg); color: var(--text); }
+.collapse-left.collapsed { cursor: pointer; }
+.collapse-left.resizing { background: var(--accent-bg); color: var(--accent); }
+/* 拖动中统一鼠标样式并禁止选中，避免误选文本 */
+.body.resizing, .body.resizing * { cursor: col-resize !important; user-select: none; }
 .detail-col { width: 48%; min-width: 460px; flex: none; height: 100%; overflow: hidden; border-left: 1px solid var(--border); background: var(--bg); }
+/* 收起左栏后详情栏弹性占满剩余空间（不写死像素，展开时按持久化比例恢复） */
+.detail-col.full { flex: 1; width: auto; min-width: 0; }
 
 /* 网格布局 */
 .grid { display: grid; grid-template-columns: 320px 1fr; height: 100%; }
@@ -73,6 +79,29 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 .list-sub { font-size: 12px; color: var(--muted); word-break: break-all; }
 .meta-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .meta-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
+/* 会话来源路径：单行省略不撑破布局，悬停 title 看完整路径，点击复制 */
+.source-path { display: flex; align-items: baseline; gap: 6px; min-width: 0; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.source-path-label { flex: none; }
+.source-path-value {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; color: var(--text); cursor: pointer;
+}
+.source-path-value:hover { color: var(--accent); text-decoration: underline; }
+.source-path-copied { flex: none; color: #1a7f37; }
+/* 桌面壳内「打开位置」入口：浏览器环境不渲染 */
+.source-open {
+  flex: none; border: none; background: none; padding: 0; font-size: 12px;
+  color: var(--accent); cursor: pointer;
+}
+.source-open:hover { text-decoration: underline; }
+.source-open-err { flex: none; color: #b42318; }
+/* 详情打开期间来源变化提示：吸顶但不遮挡操作，点击才加载最新 */
+.update-banner {
+  position: sticky; top: 0; z-index: 3;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 10px; padding: 8px 12px; border-radius: 6px;
+  background: #fff8c5; border: 1px solid #d4a72c; color: #7d4e00; font-size: 13px;
+}
 
 /* 搜索 */
 .search-bar { display: flex; gap: 10px; padding: 14px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; align-items: center; }
@@ -102,7 +131,7 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 .turn-role { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 12px; color: var(--muted); border-bottom: 1px solid #eaeef2; background: var(--bg); }
 .turn-role.user { color: #3a3f44; }
 .turn-body { padding: 12px; }
-.message { white-space: pre-wrap; font-size: 14px; line-height: 1.6; }
+.message { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.6; }
 
 .collapse-head {
   display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;
@@ -166,7 +195,7 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 @keyframes boot-spin { to { transform: rotate(360deg); } }
 
 /* —— 详情 Markdown 渲染模式（默认；工具栏可切原文） —— */
-.md { font-size: 14px; line-height: 1.65; }
+.md { font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
 .md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 14px 0 8px; line-height: 1.3; color: var(--text); }
 .md h1 { font-size: 20px; } .md h2 { font-size: 18px; } .md h3 { font-size: 16px; }
 .md h4, .md h5, .md h6 { font-size: 15px; }
@@ -181,7 +210,8 @@ mark { background: #ffe58f; color: inherit; border-radius: 3px; padding: 0 1px; 
 .md th, .md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
 .md th { background: rgba(175, 184, 193, 0.12); }
 .md del { color: var(--muted); }
-.md .code { margin: 8px 0; }
+.md img { max-width: 100%; height: auto; }
+.md .code { margin: 8px 0; max-width: 100%; }
 
 /* —— M4：统计视图 —— */
 .stats-page { padding: 20px; overflow-y: auto; height: 100%; }

@@ -76,11 +76,25 @@ export interface SessionDetail {
   starred: number
   rawFormat: string | null
   sourceNote: string | null
+  // 内容来源：可能是文件、目录，或 cloud: 等虚拟来源（来自 DB 的 source_file）
+  sourceFile: string | null
+  sourceKind: 'file' | 'dir' | 'virtual' | 'missing' | null
+  // 源路径的轻量指纹（mtime+size / mtime+条目数），虚拟或不可读来源为 null
+  sourceFingerprint: string | null
   project: string | null
   account: string | null
   accountKind: string | null
   turns: Turn[]
   subjects: Subject[]
+}
+
+// 详情页变化检查返回值（轻量，不含正文）
+export interface SessionSourceState {
+  id: string
+  updatedAt: number | null
+  sourceFile: string | null
+  sourceKind: 'file' | 'dir' | 'virtual' | 'missing' | null
+  sourceFingerprint: string | null
 }
 
 export interface SearchHit {

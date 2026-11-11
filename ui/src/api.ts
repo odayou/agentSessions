@@ -2,7 +2,7 @@
 // dev：走 Vite proxy(/api→127.0.0.1:18778)；prod(Tauri 内)：直连桥。
 import type {
   Project, Account, AgentStat, SessionSummary, SessionDetail, SearchHit, ScanResult,
-  ExportResult, Stats, AppConfig, DetectedAgent,
+  ExportResult, Stats, AppConfig, DetectedAgent, SessionSourceState,
 } from './types'
 
 const BASE = import.meta.env.DEV ? '/api' : 'http://127.0.0.1:18778/api'
@@ -44,6 +44,11 @@ export function fetchSession(id: string) {
   return get<{ session: SessionDetail }>(`/session?id=${encodeURIComponent(id)}`).then(d => d.session)
 }
 
+// 详情打开期间的低频变化检查（只返回来源指纹，不含正文）
+export function fetchSessionChanges(id: string) {
+  return get<{ session: SessionSourceState }>(`/session/changes?id=${encodeURIComponent(id)}`).then(d => d.session)
+}
+
 export function doSearch(f: { q: string; depth: number; account?: string; project?: string; agent?: string; from?: number; to?: number; auto?: boolean; minResults?: number }) {
   const p = new URLSearchParams()
   if (f.q) p.set('q', f.q)
@@ -57,8 +62,9 @@ export function doSearch(f: { q: string; depth: number; account?: string; projec
   return get<{ hits: SearchHit[]; total: number; depth?: number; escalated?: boolean }>(`/search?${p.toString()}`)
 }
 
-export async function doScan() {
-  const r = await fetch(`${BASE}/scan`, { method: 'POST' })
+export async function doScan(only?: string) {
+  const qs = only ? `?only=${encodeURIComponent(only)}` : ''
+  const r = await fetch(`${BASE}/scan${qs}`, { method: 'POST' })
   const d = await r.json()
   if (!r.ok || !d.ok) throw new Error(d.error || 'scan failed')
   return d as ScanResult

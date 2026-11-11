@@ -1,8 +1,8 @@
 import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchSession, fetchExport, fetchContext, toggleStar } from '../api'
+import { fetchSession, fetchSessionChanges, fetchExport, fetchContext, toggleStar, doScan } from '../api'
 import { highlightHtml } from '../highlight'
 import { renderMarkdown } from '../markdown'
-import { fmtTimeFull, highlight } from '../lib'
+import { fmtTimeFull, highlight, IS_TAURI, openSourceInFileManager } from '../lib'
 import type { SessionDetail, Turn, Locate } from '../types'
 
 // —— 详情消息类型过滤（想法.md §详情中支持选择只展示部分类型）——
@@ -160,6 +160,31 @@ function triggerDownload(name: string, content: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
+// 来源类型标签：文件/目录如实区分；cloud: 等虚拟来源明确说明无本地文件
+function sourceKindLabel(kind: SessionDetail['sourceKind']) {
+  if (kind === 'file') return '来源文件'
+  if (kind === 'dir') return '来源目录'
+  if (kind === 'virtual') return '来源（云端，无本地文件）'
+  return '来源路径（本地已不存在）'
+}
+
+// 复制文本：优先剪贴板 API，降级 textarea（兼容非安全上下文）
+async function copyText(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true } catch { /* 降级 */ }
+  try {
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(ta)
+    return ok
+  } catch { return false }
+}
+
+// 详情打开期间的变化检查间隔（低频、只读指纹，不影响阅读）
+const CHANGE_CHECK_MS = 8000
+
 export default function SessionView({ sessionId, locate, onBack }: { sessionId: string; locate?: Locate; onBack: () => void }) {
   const [s, setS] = useState<SessionDetail | null>(null)
   const [err, setErr] = useState('')
@@ -180,13 +205,26 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
   const [visibleCount, setVisibleCount] = useState(CHUNK)
   const sentinelRef = useRef<HTMLDivElement | null>(null)
   const scrolledRef = useRef(false)
+  // 来源路径复制反馈 / 变化提示（不自动刷新，用户点击后才加载）
+  const [pathCopied, setPathCopied] = useState(false)
+  const [sourceOpenErr, setSourceOpenErr] = useState('')
+  const [updateHint, setUpdateHint] = useState(false)
+  const [reloading, setReloading] = useState(false)
+  const [reloadMsg, setReloadMsg] = useState('')
+  const baselineRef = useRef<string | null>(null) // 打开时的源指纹，用于比对变化
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingScrollRef = useRef<number | null>(null) // 刷新后恢复阅读位置
   // 搜索命中定位（readme §D）：locate 变化时预填会话内搜索词并滚动到命中轮次
   const locateKey = `${locate?.seq ?? ''}|${locate?.q ?? ''}`
 
   useEffect(() => {
     setS(null); setErr('')
+    setUpdateHint(false); setReloadMsg(''); setSourceOpenErr('')
     setInlineQ(locate?.q || '')
-    fetchSession(sessionId).then(setS).catch((e) => setErr(String(e)))
+    baselineRef.current = null
+    fetchSession(sessionId)
+      .then((d) => { baselineRef.current = d.sourceFingerprint; setS(d) })
+      .catch((e) => setErr(String(e)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, locateKey])
 
@@ -233,6 +271,52 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [s, locateKey, visibleCount, deferredQ])
 
+  // 详情打开期间低频检查来源是否变化：只比对轻量指纹，不自动刷新、不打断阅读。
+  // 虚拟来源（cloud:）或无指纹时停止检查，避免无效轮询。
+  const sourceFp = s?.sourceFingerprint ?? null
+  useEffect(() => {
+    if (!sourceFp) return
+    let stopped = false
+    const tick = async () => {
+      if (stopped || document.hidden) return
+      try {
+        const st = await fetchSessionChanges(sessionId)
+        if (!stopped) {
+          const changed = !!st.sourceFingerprint && st.sourceFingerprint !== baselineRef.current
+          setUpdateHint(changed)
+        }
+      } catch { /* 瞬时失败忽略，下轮再试 */ }
+    }
+    const timer = setInterval(tick, CHANGE_CHECK_MS)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [sessionId, sourceFp])
+
+  // 用户点击后才加载最新：先对该 agent 增量扫描让新内容落库，再重拉详情并尽量保持阅读位置
+  const onReloadLatest = async () => {
+    if (!s || reloading) return
+    setReloading(true); setReloadMsg('')
+    pendingScrollRef.current = scrollRef.current ? scrollRef.current.scrollTop : null
+    try {
+      await doScan(s.agentId)
+      const d = await fetchSession(sessionId)
+      baselineRef.current = d.sourceFingerprint
+      setS(d)
+      setUpdateHint(false)
+    } catch (e) {
+      setReloadMsg('加载最新内容失败：' + (e as Error).message)
+    } finally {
+      setReloading(false)
+    }
+  }
+
+  // 刷新详情后恢复滚动位置（新增内容在末尾时阅读位置保持不变）
+  useEffect(() => {
+    const top = pendingScrollRef.current
+    if (top == null || !scrollRef.current) return
+    pendingScrollRef.current = null
+    scrollRef.current.scrollTop = top
+  }, [s])
+
   // 星标收藏：本地即时更新，失败回滚提示
   const onStar = async () => {
     if (!s) return
@@ -267,6 +351,26 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
       setCopyMsg('获取上下文失败：' + (e as Error).message)
     } finally {
       setCopyBusy(false)
+    }
+  }
+
+  // 点击来源路径复制（悬停 title 已给出完整路径）
+  const onCopyPath = async () => {
+    if (!s?.sourceFile) return
+    const ok = await copyText(s.sourceFile)
+    setPathCopied(ok)
+    if (ok) setTimeout(() => setPathCopied(false), 1500)
+  }
+
+  // 桌面壳内打开来源位置：文件定位选中、目录直接打开；失败给出明确提示
+  const onOpenSource = async () => {
+    if (!s?.sourceFile) return
+    setSourceOpenErr('')
+    try {
+      await openSourceInFileManager(s.sourceFile, s.sourceKind === 'dir' ? 'dir' : 'file')
+    } catch (e) {
+      console.error('打开来源位置失败：', e)
+      setSourceOpenErr('打开失败：路径不存在或无法访问')
     }
   }
 
@@ -309,7 +413,16 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
   if (!s) return <div className="empty">加载会话…</div>
 
   return (
-    <div style={{ padding: 20, maxWidth: 880, margin: '0 auto', height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
+    <div ref={scrollRef} style={{ padding: 20, height: '100%', overflowY: 'auto', boxSizing: 'border-box' }}>
+      {updateHint && (
+        <div className="update-banner" role="status">
+          <span>检测到来源内容已更新</span>
+          <button className="scan-btn" disabled={reloading} onClick={onReloadLatest}>
+            {reloading ? '加载中…' : '点击加载最新'}
+          </button>
+          {reloadMsg && <span className="hint">{reloadMsg}</span>}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <button className="scan-btn" onClick={onBack}>← 返回</button>
         {/* <button
@@ -350,6 +463,27 @@ export default function SessionView({ sessionId, locate, onBack }: { sessionId: 
           <span className="meta-tag">{s.turnCount} 轮</span>
           <span className="meta-tag">{fmtTimeFull(s.updatedAt)}</span>
         </div>
+        {s.sourceFile && (
+          <div className="source-path">
+            <span className="source-path-label">{sourceKindLabel(s.sourceKind)}：</span>
+            <span
+              className="source-path-value"
+              title={`${s.sourceFile}（点击复制路径）`}
+              onClick={onCopyPath}
+            >{s.sourceFile}</span>
+            {IS_TAURI && s.sourceKind !== 'virtual' && (
+              <button
+                className="source-open"
+                onClick={onOpenSource}
+                title={s.sourceKind === 'dir' ? '在资源管理器中打开该目录' : '在资源管理器中显示该文件'}
+              >
+                打开位置
+              </button>
+            )}
+            {pathCopied && <span className="source-path-copied">已复制</span>}
+            {sourceOpenErr && <span className="source-open-err">{sourceOpenErr}</span>}
+          </div>
+        )}
         {s.sourceNote && (
           <div className="source-note" style={{ marginTop: 10, padding: '8px 12px', borderRadius: 6, background: '#fff3cd', border: '1px solid #e0c252', color: '#7a5c00', fontSize: 13 }}>
             ⓘ {s.sourceNote}

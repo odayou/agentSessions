@@ -1,6 +1,7 @@
 'use strict'
 // 只读查询层：为 UI/搜索提供项目聚合、账号、会话列表、会话详情。
 // 独立于写入(store)与检索(search)，全部走普通索引与联表，复用 openStore。
+const fs = require('node:fs')
 const { openStore } = require('./model')
 
 // 项目聚合列表：会话数、agent 分布、账号分布、最近活动
@@ -124,13 +125,37 @@ function listSessions(dbPath, { projectId, accountId, agentId, q, limit = 200 } 
 }
 
 // 会话详情：turns + subjects
+// 来源路径类型：source_file 可能是文件（jsonl/SQLite 库）、目录（如 codebuddy 消息目录）
+// 或虚拟来源（如 cloud:<id>）；stat 失败说明本地来源已不可用，如实标 missing。
+function sourceKindOf(sourceFile) {
+  if (!sourceFile) return null
+  if (/^cloud:/i.test(sourceFile)) return 'virtual'
+  try {
+    const st = fs.statSync(sourceFile)
+    return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : 'missing'
+  } catch { return 'missing' }
+}
+
+// 轻量内容指纹（详情打开期间低频比对，不解析文件内容）：
+// - 文件：mtime+size
+// - 目录：mtime+条目数（codebuddy messages 目录按消息一文件追加，新增文件同时更新两者）
+// - 虚拟来源/不可读：null（无法可靠判断，不提示）
+function sourceFingerprintOf(sourceFile, kind) {
+  if (!sourceFile || !kind || kind === 'virtual' || kind === 'missing') return null
+  try {
+    const st = fs.statSync(sourceFile)
+    if (kind === 'dir') return `d:${st.mtimeMs}:${fs.readdirSync(sourceFile).length}`
+    return `f:${st.mtimeMs}:${st.size}`
+  } catch { return null }
+}
+
 function sessionDetail(dbPath, sessionId) {
   const db = openStore(dbPath)
   try {
     const sess = db.prepare(`
       SELECT s.id, s.agent_id, s.agent_session_id, s.title, s.subject, s.parent_subject,
              s.model, s.created_at, s.updated_at, s.turn_count, s.cwd, s.starred,
-             s.raw_format, s.notes, p.name AS project, a.display_name AS account_name,
+             s.raw_format, s.notes, s.source_file, p.name AS project, a.display_name AS account_name,
              a.raw_name AS account_raw, a.kind AS account_kind
       FROM sessions s
       LEFT JOIN projects p ON p.id = s.project_id
@@ -153,6 +178,7 @@ function sessionDetail(dbPath, sessionId) {
     const subjects = db.prepare(`
       SELECT layer, subject, parent_id FROM subjects WHERE session_id = ? ORDER BY id
     `).all(sessionId)
+    const sourceKind = sourceKindOf(sess.source_file)
     return {
       id: sess.id, agentId: sess.agent_id, agentSessionId: sess.agent_session_id,
       title: sess.title, subject: sess.subject, parentSubject: sess.parent_subject,
@@ -160,7 +186,26 @@ function sessionDetail(dbPath, sessionId) {
       turnCount: sess.turn_count, cwd: sess.cwd, starred: sess.starred,
       rawFormat: sess.raw_format, sourceNote: sess.notes, project: sess.project,
       account: sess.account_name || sess.account_raw, accountKind: sess.account_kind,
+      // 内容来源（文件/目录/虚拟来源如实标注）+ 轻量指纹（详情页变化检测用）
+      sourceFile: sess.source_file, sourceKind,
+      sourceFingerprint: sourceFingerprintOf(sess.source_file, sourceKind),
       turns, subjects,
+    }
+  } finally {
+    db.close()
+  }
+}
+
+// 详情页轻量变化检查：只读 DB 取来源路径并算指纹，不解析内容、不写库
+function sessionSourceState(dbPath, sessionId) {
+  const db = openStore(dbPath)
+  try {
+    const row = db.prepare('SELECT id, updated_at, source_file FROM sessions WHERE id = ?').get(sessionId)
+    if (!row) return null
+    const sourceKind = sourceKindOf(row.source_file)
+    return {
+      id: row.id, updatedAt: row.updated_at, sourceFile: row.source_file, sourceKind,
+      sourceFingerprint: sourceFingerprintOf(row.source_file, sourceKind),
     }
   } finally {
     db.close()
@@ -253,4 +298,4 @@ function stats(dbPath, { days = 30 } = {}) {
   }
 }
 
-module.exports = { listProjects, listAccounts, listAgents, listSessions, sessionDetail, stats }
+module.exports = { listProjects, listAccounts, listAgents, listSessions, sessionDetail, sessionSourceState, stats }

@@ -1,4 +1,5 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import type { PointerEvent as ReactPointerEvent } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { doScan, ping, fetchStats, fetchConfig, type CodebuddyCredentialState } from './api'
 import ProjectsView from './views/ProjectsView'
@@ -26,6 +27,17 @@ interface Route {
 
 const LIST_VIEWS: ListView[] = ['sessions', 'projects', 'stats', 'settings']
 const EMPTY_LOCATE: Locate = { seq: null, q: '' }
+
+// 双栏宽度：详情栏默认 48%，可拖动分隔条调整并持久化；左右各保留合理最小宽度
+const DETAIL_PCT_KEY = 'agentsessions.detailPct'
+const DEFAULT_DETAIL_PCT = 48
+const MIN_LEFT_PX = 360
+const MIN_DETAIL_PX = 460
+
+function loadDetailPct() {
+  const v = Number(localStorage.getItem(DETAIL_PCT_KEY))
+  return Number.isFinite(v) && v > 0 ? Math.min(75, Math.max(25, v)) : DEFAULT_DETAIL_PCT
+}
 
 function parseHash(): Route {
   const seg = (location.hash || '#/').replace(/^#\/?/, '').split('/').filter(Boolean)
@@ -58,6 +70,12 @@ export default function App() {
   const [scanning, setScanning] = useState(false)
   const [scanMsg, setScanMsg] = useState('')
   const [leftCollapsed, setLeftCollapsed] = useState(false)
+  // 双栏宽度比例（详情栏，%）与拖动状态；收起时详情栏弹性占满，不参与拖动
+  const [detailPct, setDetailPct] = useState(loadDetailPct)
+  const [resizing, setResizing] = useState(false)
+  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const dragRef = useRef<{ x: number; pct: number; lastPct: number; moved: boolean; w: number } | null>(null)
+  const suppressClickRef = useRef(false)
   // 扫描后递增以强制列表/详情重挂载重拉数据
   const [refreshKey, setRefreshKey] = useState(0)
   // 搜索快捷键（设置页可录制自定义；默认 '/'）
@@ -162,6 +180,41 @@ export default function App() {
     location.hash = `#/${lastList}`
   }, [])
 
+  // 拖动分隔条调整左右宽度：按容器宽度换算百分比，并约束左右最小像素宽
+  const onSplitDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (leftCollapsed) return
+    const w = bodyRef.current?.clientWidth || window.innerWidth
+    dragRef.current = { x: e.clientX, pct: detailPct, lastPct: detailPct, moved: false, w }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
+
+  const onSplitMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current
+    if (!d) return
+    const dx = e.clientX - d.x
+    if (!d.moved && Math.abs(dx) > 3) { d.moved = true; setResizing(true) }
+    if (!d.moved) return
+    const minPct = Math.min(90, (MIN_DETAIL_PX / d.w) * 100)
+    const maxPct = Math.max(minPct, ((d.w - 18 - MIN_LEFT_PX) / d.w) * 100)
+    const pct = Math.min(maxPct, Math.max(minPct, d.pct - (dx / d.w) * 100))
+    d.lastPct = pct
+    setDetailPct(pct)
+  }
+
+  const onSplitUp = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    const d = dragRef.current
+    if (!d) return
+    dragRef.current = null
+    setResizing(false)
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId)
+    if (d.moved) {
+      // 拖动结束才写 localStorage；并吞掉本次 pointerup 后的 click，避免误触收起
+      localStorage.setItem(DETAIL_PCT_KEY, String(Number(d.lastPct.toFixed(1))))
+      suppressClickRef.current = true
+      setTimeout(() => { suppressClickRef.current = false }, 0)
+    }
+  }
+
   // 快捷键（M4）：Esc 关闭详情返回列表；可自定义热键（默认 /）聚焦主页常驻搜索框
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -235,7 +288,7 @@ export default function App() {
         <span className="status">{scanMsg}</span>
         <button className="scan-btn" disabled={scanning} onClick={onScan}>{scanning ? '扫描中…' : '扫描'}</button>
       </header>
-      <div className="body">
+      <div ref={bodyRef} className={`body ${resizing ? 'resizing' : ''}`}>
         {/* 左栏：列表视图（详情打开时可收起） */}
         <div className={`main-col ${route.sessionId ? 'has-detail' : ''} ${route.sessionId && leftCollapsed ? 'collapsed' : ''}`}>
           {route.list === 'sessions' && <TimelineView key={`tl-${refreshKey}`} onOpenSession={openSession} hotkeyLabel={formatHotkey(searchHotkey)} autoFocusSearch={route.focusSearch} />}
@@ -247,13 +300,23 @@ export default function App() {
         {route.sessionId && (
           <>
             <button
-              className="collapse-left"
-              title={leftCollapsed ? '展开列表' : '收起列表'}
-              onClick={() => setLeftCollapsed((v) => !v)}
+              className={`collapse-left ${leftCollapsed ? 'collapsed' : ''} ${resizing ? 'resizing' : ''}`}
+              title={leftCollapsed ? '展开列表' : '拖动调整宽度，点击收起列表'}
+              onPointerDown={onSplitDown}
+              onPointerMove={onSplitMove}
+              onPointerUp={onSplitUp}
+              onPointerCancel={onSplitUp}
+              onClick={() => {
+                if (suppressClickRef.current) { suppressClickRef.current = false; return }
+                setLeftCollapsed((v) => !v)
+              }}
             >
               {leftCollapsed ? '»' : '«'}
             </button>
-            <div className="detail-col">
+            <div
+              className={`detail-col ${leftCollapsed ? 'full' : ''}`}
+              style={leftCollapsed ? undefined : { width: `${detailPct}%` }}
+            >
               <SessionView key={`d-${route.sessionId}-${refreshKey}`} sessionId={route.sessionId} locate={route.locate} onBack={closeSession} />
             </div>
           </>
