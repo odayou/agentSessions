@@ -88,7 +88,7 @@ export default function SearchPanel({ q, account, project, agent, time, fromD, t
   }, [trigger])
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', overflowY: 'auto' }}>
       {err && <div className="error">{err}</div>}
 
       {/* 搜索状态行：让"搜到哪一层"可见，并提供手动继续深搜入口 */}

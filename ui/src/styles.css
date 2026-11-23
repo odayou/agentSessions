@@ -75,7 +75,7 @@ body { margin: 0; background: var(--bg); color: var(--text); }
 }
 .list-item:hover { background: var(--bg); }
 .list-item.active { background: var(--accent-bg); }
-.list-title { font-size: 14px; font-weight: 600; }
+.list-title { font-size: 14px; font-weight: 600; word-wrap: break-word;}
 .list-sub { font-size: 12px; color: var(--muted); word-break: break-all; }
 .meta-tags { display: flex; flex-wrap: wrap; gap: 6px; }
 .meta-tag { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--bg); border: 1px solid var(--border); color: var(--muted); }
