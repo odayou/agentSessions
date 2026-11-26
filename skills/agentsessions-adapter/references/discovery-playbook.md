@@ -28,6 +28,7 @@
   - `{"role":"assistant","tool_calls":[{"id":...,"type":"function","function":{"name":"Grep|Read|Edit","arguments":{...}}}]}`
   - `{"role":"tool","content":"工具回执","tool_call_id":"..."}`
 - 没有逐行时间戳；会话级时间只能回落文件 mtime。
+- **格式变体**：部分会话（如 `38456694777105154`）的 trajectory 里**完全没有 `role=user` 记录**，用户原话只在同目录上一层的 `assignment.md`（`## [时间戳] 需求` 下的正文）。此时清单必须用 `session.userFile="assignment.md"` + `session.userPattern="^## \\[.*\\] 需求\\s*$"` 补首轮，否则 `assembleTurns` 丢弃全部事件，会话完全索引不到。
 
 ## 清单映射与验证结果
 

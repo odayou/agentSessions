@@ -44,6 +44,7 @@ python scripts/find_session_files.py --keyword "用户原话片段" --keyword "�
 - `session.id` 必须稳定且全局唯一（优先工具自己的 UUID）；缺省会回退为文件名，多会话必冲突。
 - `session.cwd` 取真实项目路径（如工具调用参数里的 `path`），否则会话被归到"未分类"。
 - `rules` 按文件里的消息顺序写，**第一条 `when` 命中的规则就消费该记录并 break**，所以 `tool_calls` 规则要放在普通 assistant 规则之前。
+- 若 transcript 只有 assistant/tool 记录、没有 `user` 记录，需求常旁挂在 `assignment.md` 等文件里：用 `session.userFile`（相对路径）+ `session.userPattern`（正则标题）补首轮，否则整个会话会被丢弃。
 - 无逐轮时间戳时不必强造：搜索层已对轮次时间做 `COALESCE(t.timestamp, s.updated_at)` 回退。
 
 ### 5. 落地清单

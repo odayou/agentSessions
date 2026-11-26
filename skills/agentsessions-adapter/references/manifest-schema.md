@@ -16,6 +16,7 @@
 - `source.root`（必填）、`source.ext`（默认 `.jsonl` / `.json`）、`source.cwdFromPath`（取 root 下第一段目录名作 cwd）。
 - `session.messagesPath`：json 引擎必填，指向消息数组（点路径，`a.b.0.c` 形式）。
 - `session.id` / `cwd` / `model` / `title` / `ts`：点路径；json 引擎的会话级字段查找域为 `[文档根, ...消息记录]`。
+- `session.userFile`：可选的旁挂需求文件（相对源文件路径，支持 `../`）；`session.userPattern`：正则标题，取其后第一段非空文本作为用户需求。当 transcript 里没有 `user` 记录（只有 assistant/tool）时，用它补首轮——否则 `assembleTurns` 会丢弃全部事件，整个会话无法索引。已有 user 记录时不重复补入。
 - `rules[]`：`role` ∈ `user|assistant|thinking|tool|title`；`when` 对象内所有字段按字符串化后**全字段相等**匹配；`text` 可为单路径或路径数组（首个非空生效）；`tool` 需 `name` 与 `input` 路径；`ts` 为字符串路径。
 
 语义与陷阱：

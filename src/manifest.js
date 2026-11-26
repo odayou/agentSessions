@@ -101,6 +101,11 @@ function validate(m) {
   if (eng === 'json' && !(m.session && typeof m.session.messagesPath === 'string' && m.session.messagesPath)) {
     return 'json 引擎需要 session.messagesPath（消息数组字段路径）'
   }
+  if (m.session && m.session.userFile !== undefined && typeof m.session.userFile !== 'string') return 'session.userFile 必须为字符串'
+  if (m.session && m.session.userPattern !== undefined) {
+    if (typeof m.session.userPattern !== 'string') return 'session.userPattern 必须为字符串'
+    try { new RegExp(m.session.userPattern) } catch { return 'session.userPattern 不是合法正则' }
+  }
   if (!Array.isArray(m.rules) || !m.rules.length) return '需要至少一条 rules'
   for (const r of m.rules) {
     if (!r || typeof r !== 'object') return 'rule 必须为对象'

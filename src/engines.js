@@ -75,8 +75,35 @@ function finalizeTurns(turns) {
   return { nonEmpty, subjects: buildSubjects(nonEmpty) }
 }
 
+// 旁挂需求文件：部分工具把用户原始需求写在 transcript 旁边（如豆包 assignment.md），
+// transcript 自身只有 assistant/tool 记录。清单声明 session.userFile（相对源文件路径）
+// 与可选 userPattern（正则标题，取其后第一段非空文本），作为首条用户消息补入事件流。
+function readPromptFile(m, file) {
+  const spec = m.session && m.session.userFile
+  if (!spec || typeof spec !== 'string') return null
+  try {
+    const p = path.isAbsolute(spec) ? manifest.resolveRoot(spec) : path.resolve(path.dirname(file), spec)
+    const text = fs.readFileSync(p, 'utf8').replace(/\r\n?/g, '\n')
+    const pat = m.session.userPattern ? new RegExp(m.session.userPattern, 'm') : null
+    if (!pat) return text.trim() || null
+    const lines = text.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      if (!pat.test(lines[i])) continue
+      const buf = []
+      for (const line of lines.slice(i + 1)) {
+        if (/^#{1,6}\s/.test(line)) break
+        if (!line.trim()) { if (buf.length) break; continue }
+        buf.push(line.trim())
+      }
+      const prompt = buf.join('\n').trim()
+      if (prompt) return prompt
+    }
+    return null
+  } catch { return null }
+}
+
 // —— 记录引擎（jsonl / json 共用）：清单 rules 把记录流转为统一事件流 ——
-// 清单字段：source{root,ext,cwdFromPath} + session{id,cwd,model,title,ts,messagesPath} + rules[]
+// 清单字段：source{root,ext,cwdFromPath} + session{id,cwd,model,title,ts,messagesPath,userFile,userPattern} + rules[]
 function recordAdapter(m) {
   const root = manifest.resolveRoot(m.source.root)
   const ext = m.source.ext || (m.engine === 'jsonl' ? '.jsonl' : '.json')
@@ -144,6 +171,13 @@ function recordAdapter(m) {
         }
         break // 一条记录至多被一条规则消费，避免二次归类
       }
+    }
+
+    // transcript 里没有用户消息时（只有 assistant/tool），用旁挂需求文件补首轮，
+    // 否则 assembleTurns 会因为没有 user 事件丢弃全部内容，整个会话无法索引。
+    if (m.session && m.session.userFile && !events.some((e) => e.kind === 'user')) {
+      const prompt = readPromptFile(m, file)
+      if (prompt) events.unshift({ ts: null, kind: 'user', text: prompt, thinking: '', tools: [] })
     }
 
     // cwd 回退链：记录字段 → cwdFromPath（root 下第一段目录名）→ 文件所在目录
