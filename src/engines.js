@@ -76,17 +76,18 @@ function finalizeTurns(turns) {
 }
 
 // 旁挂需求文件：部分工具把用户原始需求写在 transcript 旁边（如豆包 assignment.md），
-// transcript 自身只有 assistant/tool 记录。清单声明 session.userFile（相对源文件路径）
-// 与可选 userPattern（正则标题，取其后第一段非空文本），作为首条用户消息补入事件流。
-function readPromptFile(m, file) {
+// transcript 可能只有部分 turn 带 user 记录。清单声明 session.userFile（相对源文件路径）
+// 与可选 userPattern（正则标题，取其后每段非空文本），把 transcript 中缺失的 turn 补进事件流。
+function readPromptFiles(m, file) {
   const spec = m.session && m.session.userFile
-  if (!spec || typeof spec !== 'string') return null
+  if (!spec || typeof spec !== 'string') return []
   try {
     const p = path.isAbsolute(spec) ? manifest.resolveRoot(spec) : path.resolve(path.dirname(file), spec)
     const text = fs.readFileSync(p, 'utf8').replace(/\r\n?/g, '\n')
     const pat = m.session.userPattern ? new RegExp(m.session.userPattern, 'm') : null
-    if (!pat) return text.trim() || null
+    if (!pat) return text.trim() ? [text.trim()] : []
     const lines = text.split('\n')
+    const out = []
     for (let i = 0; i < lines.length; i++) {
       if (!pat.test(lines[i])) continue
       const buf = []
@@ -96,10 +97,10 @@ function readPromptFile(m, file) {
         buf.push(line.trim())
       }
       const prompt = buf.join('\n').trim()
-      if (prompt) return prompt
+      if (prompt) out.push(prompt)
     }
-    return null
-  } catch { return null }
+    return out
+  } catch { return [] }
 }
 
 // —— 记录引擎（jsonl / json 共用）：清单 rules 把记录流转为统一事件流 ——
@@ -173,11 +174,15 @@ function recordAdapter(m) {
       }
     }
 
-    // transcript 里没有用户消息时（只有 assistant/tool），用旁挂需求文件补首轮，
-    // 否则 assembleTurns 会因为没有 user 事件丢弃全部内容，整个会话无法索引。
-    if (m.session && m.session.userFile && !events.some((e) => e.kind === 'user')) {
-      const prompt = readPromptFile(m, file)
-      if (prompt) events.unshift({ ts: null, kind: 'user', text: prompt, thinking: '', tools: [] })
+    // transcript 常只记录部分 turn 的 user 消息（豆包早期 turn 无 user 记录），
+    // 缺失的 turn 用旁挂需求补齐；否则 assembleTurns 会把这些轮次的助手回复全部丢掉。
+    // 缺失段按时间顺序插到事件流最前：已有的 user 记录保持原位，各自承接后续 assistant/tool。
+    if (m.session && m.session.userFile) {
+      const known = new Set(events.filter((e) => e.kind === 'user').map((e) => e.text.trim()))
+      const missing = readPromptFiles(m, file).filter((text) => !known.has(text.trim()))
+      for (let i = missing.length - 1; i >= 0; i--) {
+        events.unshift({ ts: null, kind: 'user', text: missing[i], thinking: '', tools: [] })
+      }
     }
 
     // cwd 回退链：记录字段 → cwdFromPath（root 下第一段目录名）→ 文件所在目录
