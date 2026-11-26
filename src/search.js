@@ -63,7 +63,7 @@ function search(dbPath, { q, depth = 2, account, projectId, agentId, from, to, l
       ${accJoin}
       WHERE turns_fts MATCH @qMatch AND (t.user_message LIKE @likeQ2 OR t.assistant_message LIKE @likeQ2)
         ${sharedSql}
-      ORDER BY t.timestamp DESC LIMIT @limit
+      ORDER BY COALESCE(t.timestamp, s.updated_at) DESC LIMIT @limit
     `) : null
     const l4_stmt = ftsMatch ? db.prepare(`
       SELECT DISTINCT t.session_id AS id, s.agent_id, s.title, s.subject, t.seq, t.thinking, t.timestamp, s.cwd, p.name AS project, ${accCols}
@@ -74,7 +74,7 @@ function search(dbPath, { q, depth = 2, account, projectId, agentId, from, to, l
       ${accJoin}
       WHERE turns_fts MATCH @qMatch AND t.thinking LIKE @likeQ2
         ${sharedSql}
-      ORDER BY t.timestamp DESC LIMIT @limit
+      ORDER BY COALESCE(t.timestamp, s.updated_at) DESC LIMIT @limit
     `) : null
     const ftsParams = { ...params, qMatch: ftsMatch, likeQ2: `%${q}%`, limit }
 
@@ -96,7 +96,8 @@ function search(dbPath, { q, depth = 2, account, projectId, agentId, from, to, l
       let d = 0
       if (d < depth) { add(l1, 1); d = 1 }
       if (d < depth && (insufficient() || d < 2)) { add(l2, 2); d = 2 }
-      if (d < depth && insufficient()) { add(l3_stmt ? l3_stmt.all(ftsParams) : [], 3); d = 3 }
+      // 正文属于默认检索范围：浅层命中多不代表正文里没有新会话（标题常被截断，关键词落在后半段）
+      if (d < depth && (insufficient() || d < 3)) { add(l3_stmt ? l3_stmt.all(ftsParams) : [], 3); d = 3 }
       if (d < depth && insufficient()) { add(l4_stmt ? l4_stmt.all(ftsParams) : [], 4); d = 4 }
       actualDepth = d
     } else {
