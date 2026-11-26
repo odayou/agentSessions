@@ -475,7 +475,7 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
           </div>
           <div className="scan-setting">
             <a className="scan-btn mini-btn" href={`${REPO_URL}/releases/latest`} target="_blank" rel="noreferrer">下载 .skill（最新 Release）</a>
-            <a className="scan-btn mini-btn" href={`${REPO_URL}/tree/main/skills/agentsessions-adapter`} target="_blank" rel="noreferrer">查看 Skill 源码</a>
+            <a className="scan-btn mini-btn" href={`${REPO_URL}/tree/master/skills/agentsessions-adapter`} target="_blank" rel="noreferrer">查看 Skill 源码</a>
           </div>
         </div>
       </div>
