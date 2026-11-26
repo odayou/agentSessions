@@ -173,6 +173,33 @@ jobs:
               "$upload_url?name=$name"
           done
 
+      # Skill 源码在仓库 skills/ 下，不进客户端打包体；仅作为 Release 资产分发，
+      # 后续更新技能只需重打资产，无需发版客户端。
+      - name: Build adapter skill package
+        if: matrix.platform.os == 'ubuntu-22.04'
+        run: npm run build:skill
+
+      - name: Upload adapter skill to release
+        if: matrix.platform.os == 'ubuntu-22.04'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.create-release.outputs.release_id }}
+        shell: bash
+        run: |
+          f=dist-skill/agentsessions-adapter.skill
+          upload_url=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID" -q .upload_url | cut -d'{' -f1)
+          name=$(basename "$f")
+          old=$(gh api "repos/$GITHUB_REPOSITORY/releases/$RELEASE_ID/assets?per_page=100" --paginate \
+                  -q ".[] | select(.name==\"$name\") | .id" || true)
+          if [ -n "$old" ]; then
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$old"
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$f" \
+            "$upload_url?name=$name"
+
       - name: Install UI dependencies
         run: npm ci
         working-directory: ui

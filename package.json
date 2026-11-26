@@ -17,6 +17,7 @@
     "bridge": "node server.js",
     "dev:ui": "cd ui && npm run dev",
     "build:backend": "node scripts/pack-backend.js",
+    "build:skill": "node scripts/pack-skill.js",
     "dev": "npm run dev:ui && npm run dev:bridge",
     "build:app": "cd ui && npm run tauri build"
   },

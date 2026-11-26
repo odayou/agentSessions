@@ -321,6 +321,10 @@ $env:TAURI_BUNDLER_TOOLS_GITHUB_MIRROR="https://gh-proxy.com"
 - **仓库维护者**：审阅并合并 PR；仓库种子文件即 [docs/manifest-repo/agent-manifests.json](docs/manifest-repo/agent-manifests.json)（顶层 `{"manifests": []}`）
 - 合并优先级：用户目录（`~/.agentsessions/adapters/`，本地试验/私有清单用）> 远端 > 内置，同名 id 高优先级覆盖
 
+#### 适配器发现 Skill（给 AI 用的接入助手）
+
+仓库 [skills/agentsessions-adapter](skills/agentsessions-adapter) 提供一份 Claude Code / CodeBuddy 技能：按关键字定位新工具的会话文件、判定格式引擎、生成声明式清单并跑 detect/scan/search 验证。`.skill` 文件作为 Release 资产分发（`npm run build:skill` 本地可构建），设置页有下载入口；**技能不进客户端打包体**，更新技能无需升级客户端。适配器本身仍通过上面的清单仓库在线交付给所有安装用户。
+
 ### 方式二：硬编码适配器
 
 数据格式复杂（多形状容错、多库遍历、重放逻辑等，参考 `claude-code.js` / `cursor.js`）：

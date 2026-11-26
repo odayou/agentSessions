@@ -466,6 +466,21 @@ export default function SettingsView({ onSaved, onCheckUpdate, checkMsg }: {
       </div>
 
       <div className="panel">
+        <h3>适配器发现 Skill（可选）</h3>
+        <div className="stats-body scan-setting" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+          <div className="hint">
+            想让 AI 帮你接入新工具？下载「agentsessions-adapter」技能并导入 Claude Code / CodeBuddy，
+            即可让它定位会话文件、生成清单并端到端验证。Skill 源码在仓库 skills/ 目录，.skill 文件随 Release 分发，
+            更新技能无需升级客户端。
+          </div>
+          <div className="scan-setting">
+            <a className="scan-btn mini-btn" href={`${REPO_URL}/releases/latest`} target="_blank" rel="noreferrer">下载 .skill（最新 Release）</a>
+            <a className="scan-btn mini-btn" href={`${REPO_URL}/tree/main/skills/agentsessions-adapter`} target="_blank" rel="noreferrer">查看 Skill 源码</a>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
         <h3>大文件保护</h3>
         <div className="stats-body scan-setting">
           <span>超过</span>
